@@ -68,15 +68,19 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 - 🎛️ **Full PSU control** — set V/I, toggle output, take/release remote control
 - 📈 **Live telemetry** — voltage, current, power, energy, temperature, runtime, errors
 - 🔋 **Charge mode** — battery charging by chemistry / cells / current
+- 🔌 **USB-PD + programmable** — read PD (PDO) profiles and stored output sequences, select/run them
+- 📡 **USB *and* Bluetooth** — `MP305` over USB-HID, `MP305BLE` (async, `bleak`) over BLE — same API
+- 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing
 - 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
-- 🧱 **Clean layers** — pure `protocol.py` framing you can reuse over BLE too
-- 🧪 **Tested without hardware** — checksum/stuffing/units verified by golden vectors
+- 🧱 **Clean layers** — pure `protocol.py` framing shared by both transports
+- 🧪 **Tested without hardware** — checksum/stuffing/units/firmware-decrypt verified by golden vectors
 - 🪪 **MIT licensed**, no ISDT code shipped (see *Clean-room* below)
 
 ## Install
 
 ```bash
-pip install pymp305
+pip install pymp305          # USB-HID
+pip install pymp305[ble]     # + Bluetooth (bleak)
 ```
 
 `hidapi` comes in as a dependency. Linux: add a udev rule so you don't need root —
@@ -110,6 +114,35 @@ with MP305.open() as psu:
 `MP305A` and `MP305B` are aliases of `MP305` if you prefer to be explicit. Live-streaming
 example: [`python/examples/basic.py`](./python/examples/basic.py).
 
+### Bluetooth (async)
+
+```python
+import asyncio
+from pymp305.ble import MP305BLE
+
+async def main():
+    psu = await MP305BLE.open()              # scan + connect + bind
+    await psu.set_output(voltage=5.0, current=1.0, on=True)
+    print(await psu.read_state())
+    await psu.close()
+
+asyncio.run(main())
+```
+
+### Firmware (decrypt / repair)
+
+Official `.bin` images are reversibly obfuscated (the key is in the header), so they decrypt
+with no secrets — useful for inspection or keeping a known-good image to restore after a bad
+flash (the protocol can't read flash back, so you can't dump the unit's current firmware).
+
+```bash
+python tools/fetch_firmware.py               # download + decrypt official images -> reversing/ (git-ignored)
+python python/examples/ota_inspect.py firmware.bin
+```
+The decryptor is verified against ISDT's released MP305A/MP305B images (checksums pass and the
+decrypted ARM vector table + embedded model id check out). **OTA *writing* is still untested —
+see the banner.**
+
 ## Protocol at a glance
 
 | What | Command | Response | Notes |
@@ -118,10 +151,14 @@ example: [`python/examples/basic.py`](./python/examples/basic.py).
 | Live state | `0xBD` / `0xC2` | `0xC3` | V·I·W·Wh·°C·output·errors |
 | System settings | `0xC4` / `0xC6` | `0xC5` / `0xC7` | brightness, OCP, auto-off… |
 | **Set output / V / I** | `0xC8` | `0xC9` | the main control command |
-| Charge mode | `0xEE` | `0xEF` | LiHv/LiPo/LiFe/Pb/NiMH… |
+| Charge mode | `0xEC` / `0xEE` | `0xED` / `0xEF` | LiHv/LiPo/LiFe/Pb/NiMH… |
+| USB-PD profiles | `0xD0` / `0xE8` | `0xD1` / `0xE9` | read PDO / select PDO |
+| Programmable sequences | `0xD4` / `0xD8` / `0xE2` | `0xD5` / `0xD9` / `0xE3` | list / read steps / run |
+| OTA | `0xF2`/`0xF4`/`0xF6` (HID), `0x80`+ (BLE) | `0xF3`/`0xF5`/`0xF7` | erase / write / verify |
 | Reboot / bootloader | `0xFCCA` / `0xF0AC` | — | danger zone |
 
-Frames are `[len, 0xAA, 0x12, paylen, cmd, …LE-payload, checksum]` with `0xAA` byte-stuffing.
+Over **USB-HID** frames are `[len, 0xAA, 0x12, paylen, cmd, …LE-payload, checksum]` with
+`0xAA` byte-stuffing; over **BLE** they're just `[0x12, cmd, …LE-payload]`.
 Full field-level spec, units, and error tables: **[PROTOCOL.md](./PROTOCOL.md)**.
 
 ## Repo layout
@@ -129,11 +166,12 @@ Full field-level spec, units, and error tables: **[PROTOCOL.md](./PROTOCOL.md)**
 ```
 PROTOCOL.md                      # the wire protocol, documented
 tools/fetch_weblink_sources.py   # reproduce the RE material from ISDT's public source-maps
+tools/fetch_firmware.py          # download + decrypt official firmware -> reversing/
 python/
-    pymp305/                     # the library (protocol · responses · device)
-    examples/basic.py
-    tests/test_protocol.py       # golden-vector framing tests (no hardware needed)
-reversing/                       # git-ignored: recovered ISDT source, kept local only
+    pymp305/                     # protocol · responses · commands · device (HID) · ble · ota
+    examples/                    # basic.py · ble.py · ota_inspect.py
+    tests/                       # golden-vector tests (no hardware needed)
+reversing/                       # git-ignored: recovered ISDT source + firmware, local only
 ```
 
 ## Clean-room & copyright
@@ -154,10 +192,11 @@ copyrightable; the implementation here is independent.
 
 ## Roadmap
 
-- [ ] Validate against real hardware (incoming 🛒)
-- [ ] BLE transport via `bleak` (same command set, reuses `responses.py`)
-- [ ] USB-PD (PDO) and programmable-sequence helpers
-- [ ] OTA firmware flashing
+- [ ] **Validate against real hardware** (unit incoming 🛒 — see the banner up top)
+- [x] BLE transport via `bleak` (`MP305BLE`, async — same command set, reuses `responses.py`)
+- [x] USB-PD (PDO) and programmable-sequence helpers
+- [x] OTA firmware flashing + firmware decryption (decrypt validated against official images;
+      flashing itself still unverified on hardware)
 
 ## License
 

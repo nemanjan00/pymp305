@@ -148,5 +148,58 @@ deviceId[8], hwVer[4] (main.sub.mend.layout), bootVer[4], appVer[4], deviceName[
 3. send `0xC4` (system) → `0xC5`; send `0xC2` (state) → `0xC3`.
 4. To control: send `0xC8` with `remoteCon=1, model=0, setVoltage, setCurrent, output`.
 5. Poll `0xBD` (realtime) every ~3 s → `0xC3` and update the UI.
-</content>
-</invoke>
+
+## BLE transport
+GATT service `0000af00-…`. Commands are written to characteristic **AF01** as raw
+`[0x12, cmd, …LE-payload]` (no length/0xAA/checksum); responses arrive as notifications and
+are parsed at **index 2** (cmd at index 1). Binding/hardware-info uses characteristic **AF02**:
+
+1. Write binding `[0x18, …16 random bytes, fastBinding=0, status=0]` to AF02.
+2. Device replies on AF02 with `[0x19, status, …]`.
+3. Write `[0xE0]` to AF02 (after ~0.5 s); device replies `[0xE1, …]`.
+
+AF02 handshake frames start with the command byte itself (cmd at index 0). The BLE
+hardware-info layout differs from HID: `[bleHwMaj, bleHwMin, bleSwMaj, bleSwMin, deviceId[8],
+hwVer[4]?]` — there is **no device-name field over BLE** (take it from the advertised name,
+which is `0000MP305A`/`0000MP305B`). `0000fee0`/`fee1` carry the BLE OTA.
+
+## Charge / USB-PD / programmable responses
+- `0xED` ChargeResp (index 5/2): batteryState, percentage, current u16/1000, capacity u32 (mAh),
+  batteryType, cells, voltage u16/100, energy u32/1000, workingTime u32, power u16/100,
+  chargeFull, output, model, temperature; optional 32-bit error word on long frames.
+- `0xEB` ChargeInfoResp: current + previous-run settings.
+- `0xD1` PDOResp: id, name[16], power, number, then `number` × u32 entries — decoded by slot:
+  fixed-PDO (j<5), augmented-PDO (j=5), SPR-AVS (j=6), EPR-AVS (j=8) with the bit layouts in
+  `responses.parse_pdo_item`.
+- `0xDF` ProgramResp: live programmable-run state incl. a large e-marker block.
+- `0xD5` ProgrammableSearchResp: list of stored sequences `[name[16], num]`.
+- `0xD9` ProgrammableOutputResp: steps `[V mV, A mA, S ×0.1s]` (last step with S=0 is raw V/A).
+
+## Firmware & OTA
+Two formats, both implemented in `pymp305.ota`:
+
+**Encrypted `.bin` (USB-HID / UART OTA).** 32-byte little-endian header:
+`encryptionKey, fileChecksum, appStorageOffset, dataStorageOffset, appSize, dataSize,
+originalBaudRate, rapidBaudRate`. The body is a reversible XOR keystream seeded from the
+header — **the key is in the file**, so decryption needs nothing external:
+```
+ks = fileChecksum
+for each 4-byte LE word: plain = word XOR ks ; ks = ((ks + key) mod 2^32) XOR key
+```
+`sum(plain words) & 0xFFFFFFFF == fileChecksum` verifies integrity. A device-info table
+(marker `0xAA55CC33`) inside the app holds the 8-byte device id (ASCII, e.g. `MP305B`) and
+hw version. *Validated*: ISDT's released MP305A/MP305B images decrypt with passing checksums,
+a valid ARM Cortex-M vector table, and the embedded id matching the model.
+
+HID OTA flow (acks at addressId 4): bootloader `0xF0AC` → `0xF1`; erase `0xF2` → `0xF3`;
+write app `0xF4` (128-byte blocks, fragmented into 61-byte reports; `0xF5` sub `0x01`=send
+next fragment, `0x00`=block accepted) → checksum `0xF6` → `0xF7`; optional data region via
+`0x20`; `0xFCCA` reboot.
+
+**Intel HEX (BLE FEE1 OTA).** Parsed by `IntelHexFirmware`; flashed over characteristic FEE1
+with `0x81` erase / `0x80` programme / `0x85` checksum / `0x83` end, driven by FEE1 reads.
+
+> The HID app-OTA writes only the application region (`appStorageOffset`); the bootloader
+> that runs the OTA is untouched, so a failed app write is normally recoverable by
+> re-flashing. There is **no flash-read command** — you cannot dump the device's current
+> firmware, only re-flash an official image.

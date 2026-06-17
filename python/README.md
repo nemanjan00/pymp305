@@ -14,7 +14,8 @@ not published.)
 ## Install
 
 ```bash
-pip install pymp305          # pulls in hidapi
+pip install pymp305          # USB-HID (pulls in hidapi)
+pip install pymp305[ble]     # + Bluetooth transport (bleak)
 ```
 
 From source (development): `pip install -e .` from this directory.
@@ -63,11 +64,30 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `set_system_settings(SystemSetCommand)` | `0xC6` |
 | `charge(ChargeCommand)` | `0xEE` battery-charge mode |
 | `set_language(i)` | `0xA2` |
+| `read_charge_state()` / `read_charge_settings()` | `0xEC`→`0xED` / `0xEA`→`0xEB` (`ChargeState` / `ChargeInfo`) |
+| `charge(ChargeCommand)` | `0xEE` start/stop a charge |
+| `read_pdo(id)` / `pdo_connect(PDOConnect)` | `0xD0`→`0xD1` read PD profile / `0xE8`→`0xE9` select it |
+| `read_program_list()` / `read_program_steps(id, n)` | `0xD4`→`0xD5` / `0xD8`→`0xD9` |
+| `read_program_state()` / `program_connect(ProgramConnect)` | `0xDE`→`0xDF` / `0xE2`→`0xE3` run a sequence |
+| `flash(Firmware, confirm=True)` | **experimental** OTA (see warnings) |
 | `reboot()` / `enter_bootloader()` | danger zone |
-| `send(cmd, payload)` / `request(cmd, expect, payload)` / `read_frame()` | raw access for PDO / programmable / OTA commands not yet wrapped |
+| `send(cmd, payload)` / `request(cmd, expect, payload)` / `read_frame()` | raw access for any other command |
 
 Units are converted for you: `voltage`/`set_voltage` in **V**, `current`/`set_current`
 in **A**, `power` in **W**, `energy` in **Wh**, `temperature` in **°C**, `working_time` in **s**.
+
+### Transports
+
+- **`MP305`** — synchronous, USB-HID (this table).
+- **`MP305BLE`** — the same API but `async` over Bluetooth (`bleak`); methods are coroutines
+  and connection is `await MP305BLE.open()`. See [`examples/ble.py`](./examples/ble.py).
+
+### Firmware (`pymp305.ota`)
+
+- **`Firmware.parse(bytes)`** — decrypt + verify an official `.bin` (key is in the header).
+- **`IntelHexFirmware.parse(...)`** — the BLE FEE1 firmware format.
+- `tools/fetch_firmware.py` downloads + decrypts official images into git-ignored `reversing/`.
+- OTA *writing* is experimental and untested on hardware — see the repo banner.
 
 ## Bring-up checklist (first run with hardware)
 
