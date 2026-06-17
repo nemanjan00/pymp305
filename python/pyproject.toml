@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymp305"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python driver for the ISDT MP305 (MP305A/MP305B) smart bench power supply over USB-HID"
 readme = "README.md"
 requires-python = ">=3.10"
