@@ -107,7 +107,6 @@ Full field-level spec, units, and error tables: **[PROTOCOL.md](./PROTOCOL.md)**
 ## Repo layout
 
 ```
-isdt-mp305/
 ├── PROTOCOL.md                 # the wire protocol, documented
 ├── tools/
 │   └── fetch_weblink_sources.py# reproduce the RE material from ISDT's public source-maps
