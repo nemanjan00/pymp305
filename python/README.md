@@ -1,15 +1,15 @@
 # pymp305
 
-A pure-Python driver for the **ISDT MP305** smart bench power supplies (**MP305A** and **MP305B**), talking to it
-over **USB-HID** — the same transport the official [WebLink](https://www.isdt.co/weblink/)
-web app uses. Reverse-engineered from WebLink's public source-maps; the full protocol is
-documented in [`../PROTOCOL.md`](../PROTOCOL.md). (The recovered upstream JS used during
-RE is ISDT's copyright and is kept locally under `reversing/`, which is git-ignored and
-not published.)
+A pure-Python driver for the **ISDT MP305** smart bench power supplies (**MP305A** and
+**MP305B**) over **USB-HID** (sync) and **Bluetooth** (async) — the same protocol the
+official [WebLink](https://www.isdt.co/weblink/) web app and PolyLink phone app use.
+Reverse-engineered from WebLink's public source-maps; the full protocol is documented in
+[`../PROTOCOL.md`](../PROTOCOL.md). (The recovered upstream JS is ISDT's copyright and is
+kept locally under `reversing/`, which is git-ignored and not published.)
 
-> Status: written from the recovered firmware protocol but **not yet validated against
-> real hardware** (the device hasn't arrived). The framing layer is covered by golden-vector
-> tests (`tests/test_protocol.py`, all passing). See *Bring-up* below for first-run checks.
+> **Status: not yet validated against real hardware.** Framing, decoding, units, and
+> firmware-decrypt are covered by golden-vector tests (`pytest`, all passing), but nothing
+> here has talked to a device. OTA *writing* is especially unverified. See *Bring-up* below.
 
 ## Install
 
@@ -62,10 +62,9 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `release_remote()` | `remoteCon=0` — return control to the panel |
 | `control(ControlCommand)` | low-level `0xC8` |
 | `set_system_settings(SystemSetCommand)` | `0xC6` |
-| `charge(ChargeCommand)` | `0xEE` battery-charge mode |
 | `set_language(i)` | `0xA2` |
 | `read_charge_state()` / `read_charge_settings()` | `0xEC`→`0xED` / `0xEA`→`0xEB` (`ChargeState` / `ChargeInfo`) |
-| `charge(ChargeCommand)` | `0xEE` start/stop a charge |
+| `charge(ChargeCommand)` | `0xEE` start/stop a battery charge |
 | `read_pdo(id)` / `pdo_connect(PDOConnect)` | `0xD0`→`0xD1` read PD profile / `0xE8`→`0xE9` select it |
 | `read_program_list()` / `read_program_steps(id, n)` | `0xD4`→`0xD5` / `0xD8`→`0xD9` |
 | `read_program_state()` / `program_connect(ProgramConnect)` | `0xDE`→`0xDF` / `0xE2`→`0xE3` run a sequence |
@@ -113,14 +112,18 @@ app). **Untested on hardware** — see notes in `reversing/FINDINGS-commands.md`
 ## Tests
 
 ```bash
-python tests/test_protocol.py        # or: pytest
+pytest                 # runs all suites (framing, charge/PD/program, OTA, experimental)
 ```
-These validate the framing/checksum/stuffing and unit decoding without hardware.
+All run without hardware — they validate framing/checksum/stuffing, unit decoding, the
+firmware decryptor, and the command builders against golden vectors.
 
-## BLE (not implemented here)
+## BLE transport
 
-The MP305 also speaks the **same command set over BLE** (used by the PolyLink phone app):
-GATT service `0000af00-…`, characteristic `af01` for command/notify, `af02` for the
-binding handshake and chunked writes, plus `fee0/fee1` for OTA. BLE frames drop the
-length/0xAA/checksum wrapper and are just `[0x12, cmd, …payload]`. Wrapping that with
-`bleak` would reuse `responses.py` directly — left as a future addition.
+Implemented via `MP305BLE` (async, `bleak`) — see *Transports* above and
+[`examples/ble.py`](./examples/ble.py). Over BLE the same command set is used but frames
+drop the length/0xAA/checksum wrapper (`[0x12, cmd, …payload]`): commands go to GATT
+characteristic `af01`, responses arrive as notifications (parsed at index 2, reusing
+`responses.py`), and an `af02` binding handshake starts the session; `fee0/fee1` carry BLE OTA.
+
+MP305 has Bluetooth, but its BLE-module firmware isn't published in the OTA feed and this
+transport is **unverified on hardware** — USB-HID is the primary path.
