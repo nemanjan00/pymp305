@@ -24,6 +24,7 @@ from . import commands as C
 from .responses import (
     HardwareInfo, State, SystemSettings,
     ChargeState, ChargeInfo, PDO, ProgramState, ProgramList, ProgramSteps,
+    annotate_emark,
 )
 
 try:
@@ -279,11 +280,23 @@ class MP305:
         cmd, payload = conn.build()
         return self.request(cmd, P.RESP_PDO_CONNECT, payload, timeout_ms)
 
+    def write_pdo(self, pdo_id: int, name: str, power: int, items: list[dict],
+                  is_last: int = 1, timeout_ms: int = 1500) -> P.Frame:
+        """Write/define a USB-PD profile (advanced — overwrites a stored profile).
+        `0xD2`→`0xD3`. See commands.pdo_write / responses.parse_pdo_item for item shape."""
+        cmd, payload = C.pdo_write(pdo_id, name, power, items, is_last)
+        return self.request(cmd, P.RESP_PDO_WRITE, payload, timeout_ms)
+
     # ---- programmable sequences -----------------------------------------
     def read_program_state(self, timeout_ms: int = 1500) -> ProgramState:
         cmd, payload = C.programmable_info()
         f = self.request(cmd, P.RESP_PROGRAM_STATE, payload, timeout_ms)
         return ProgramState.parse(f.values, index=5)
+
+    def read_emarker(self, timeout_ms: int = 1500) -> dict:
+        """Read the attached USB-C cable's e-marker info (from the programmable-run state
+        `0xDF`), with speed/format labels applied. `present=False` if no e-marked cable."""
+        return annotate_emark(self.read_program_state(timeout_ms).emark)
 
     def read_program_list(self, timeout_ms: int = 1500) -> ProgramList:
         cmd, payload = C.programmable_list()
@@ -298,6 +311,18 @@ class MP305:
     def program_connect(self, conn: C.ProgramConnect, timeout_ms: int = 1500) -> P.Frame:
         cmd, payload = conn.build()
         return self.request(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout_ms)
+
+    def write_program(self, seq_id: int, steps: list[dict], timeout_ms: int = 1500) -> P.Frame:
+        """Write a programmable sequence's steps (`0xDA`→`0xDB`). Each step:
+        {"V": volts, "A": amps, "S": seconds}."""
+        cmd, payload = C.programmable_write(seq_id, steps)
+        return self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout_ms)
+
+    def program_change(self, seq_id: int, name: str, num: int, is_last: int = 1,
+                       remove: int = 0, timeout_ms: int = 1500) -> P.Frame:
+        """Create / rename / delete a programmable-sequence slot (`0xD6`→`0xD7`)."""
+        cmd, payload = C.programmable_change(seq_id, name, num, is_last, remove)
+        return self.request(cmd, P.RESP_PROGRAM_CHANGE, payload, timeout_ms)
 
     def send_command(self, cmd_payload: tuple[int, bytes]) -> None:
         """Send a (cmd, payload) tuple from the ``commands`` module without waiting."""

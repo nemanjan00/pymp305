@@ -51,6 +51,9 @@ RESP_PROGRAM_STATE  = 0xDF
 RESP_PROGRAM_CONNECT = 0xE3
 RESP_GET_LANGUAGE   = 0xA1
 RESP_SOFT_RESET     = 0xFF
+RESP_PDO_WRITE      = 0xD3
+RESP_PROGRAM_CHANGE = 0xD7
+RESP_PROGRAM_WRITE  = 0xDB
 
 # raw multi-byte payloads for boot/reboot (cmd byte + extra data bytes)
 BOOT_PAYLOAD   = bytes([0xF0, 0xAC])   # jump to bootloader

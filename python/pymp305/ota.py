@@ -30,6 +30,31 @@ def _u32le(b: bytes, off: int = 0) -> int:
     return b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24)
 
 
+@dataclass
+class BootInfo:
+    """BLE bootloader info from a FEE1 read (BootInfoModel / handleCharacteristicFEE1)."""
+    type: str = "A"
+    offset: int = 0
+    block_size: int = 0
+    support_0x85: int = 0
+    app_id: int = 0
+    raw: bytes = b""
+
+    @classmethod
+    def parse(cls, data: bytes) -> "BootInfo":
+        b = bytes(data)
+        if len(b) < 8:
+            return cls(raw=b)
+        return cls(
+            type="B" if b[0] == 1 else "A",
+            offset=_u32le(b, 1),
+            block_size=(b[6] & 0xFF) * 256 + (b[5] & 0xFF),
+            support_0x85=b[7],
+            app_id=b[8] if len(b) > 8 else 0,
+            raw=b,
+        )
+
+
 def xor_crypt(body: bytes, encryption_key: int, file_checksum: int) -> bytes:
     """The MP305 firmware keystream (its own inverse — same call encrypts or decrypts).
 

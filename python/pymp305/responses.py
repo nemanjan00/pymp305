@@ -21,6 +21,23 @@ MODEL_CHARGE = 3
 
 BATTERY_TYPES = ["LiHv", "LiPo", "Lilon", "LiFe", "Pb", "NiMH/Cd"]
 
+# USB-C e-marker enums (from MP305B/model.js)
+EMARK_SPEED = [
+    "USB2.0 only (480Mbps)", "USB3.2 Gen1 (5Gbps)",
+    "USB3.2/USB4 Gen2 (10Gbps/20Gbps)", "USB4 Gen3 (40Gbps)", "USB4 Gen4 (80Gbps)",
+]
+EMARK_FORMAT = ["V:1", "V:2", "V:3"]
+
+
+def annotate_emark(em: dict) -> dict:
+    """Add human-readable labels to a ProgramState.emark dict (speed/format)."""
+    out = dict(em)
+    s, f = em.get("speed"), em.get("format")
+    out["speed_label"] = EMARK_SPEED[s] if isinstance(s, int) and s < len(EMARK_SPEED) else None
+    out["format_label"] = EMARK_FORMAT[f] if isinstance(f, int) and f < len(EMARK_FORMAT) else None
+    out["present"] = bool(em.get("emark"))
+    return out
+
 
 def _u8(b, i):  return b[i]
 def _u16(b, i): return b[i] | (b[i + 1] << 8)

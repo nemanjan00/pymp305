@@ -36,6 +36,7 @@ from .device import ControlCommand, ChargeCommand, SystemSetCommand, MP305Error
 from .responses import (
     HardwareInfo, State, SystemSettings,
     ChargeState, ChargeInfo, PDO, ProgramState, ProgramList, ProgramSteps,
+    annotate_emark,
 )
 
 try:
@@ -191,6 +192,11 @@ class MP305BLE:
         f = await self.request(cmd, P.RESP_PROGRAM_STATE, payload, timeout)
         return ProgramState.parse(f.values, index=_IDX)
 
+    async def read_emarker(self, timeout: float = 2.0) -> dict:
+        """Read the attached USB-C cable's e-marker info (with speed/format labels)."""
+        st = await self.read_program_state(timeout)
+        return annotate_emark(st.emark)
+
     async def read_program_list(self, timeout: float = 2.0) -> ProgramList:
         cmd, payload = C.programmable_list()
         f = await self.request(cmd, P.RESP_PROGRAM_LIST, payload, timeout)
@@ -241,9 +247,23 @@ class MP305BLE:
         cmd, payload = conn.build()
         return await self.request(cmd, P.RESP_PDO_CONNECT, payload, timeout)
 
+    async def write_pdo(self, pdo_id: int, name: str, power: int, items: list[dict],
+                        is_last: int = 1, timeout: float = 2.0) -> P.Frame:
+        cmd, payload = C.pdo_write(pdo_id, name, power, items, is_last)
+        return await self.request(cmd, P.RESP_PDO_WRITE, payload, timeout)
+
     async def program_connect(self, conn: C.ProgramConnect, timeout: float = 2.0) -> P.Frame:
         cmd, payload = conn.build()
         return await self.request(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout)
+
+    async def write_program(self, seq_id: int, steps: list[dict], timeout: float = 2.0) -> P.Frame:
+        cmd, payload = C.programmable_write(seq_id, steps)
+        return await self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout)
+
+    async def program_change(self, seq_id: int, name: str, num: int, is_last: int = 1,
+                             remove: int = 0, timeout: float = 2.0) -> P.Frame:
+        cmd, payload = C.programmable_change(seq_id, name, num, is_last, remove)
+        return await self.request(cmd, P.RESP_PROGRAM_CHANGE, payload, timeout)
 
     async def set_language(self, index: int, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_SET_LANGUAGE, 0xA3, bytes([index & 0xFF]), timeout)
@@ -262,6 +282,57 @@ class MP305BLE:
             raise MP305Error("soft_reset() is experimental — pass confirm=True to proceed")
         f = await self.request(P.CMD_SOFT_RESET, P.RESP_SOFT_RESET, P.SOFT_RESET_MAGIC, timeout)
         return f.payload[:2] == P.SOFT_RESET_MAGIC
+
+    # ---- OTA over BLE (experimental, untested) ---------------------------
+    async def flash_ble(self, firmware, *, confirm: bool = False, progress=None,
+                        status_tries: int = 60, status_delay: float = 0.05) -> None:
+        """EXPERIMENTAL, UNTESTED BLE OTA over the FEE0/FEE1 service.
+
+        `firmware` is an ``ota.IntelHexFirmware``. **Requires the device to already be in
+        the BLE bootloader** (FEE1 present) — typically after `enter_bootloader()` + a
+        reconnect. Drives the FEE1 state machine: read boot-info → erase → programme loop →
+        checksum → end, polling FEE1 (`readback[0]==0` = step ok). Gated behind
+        ``confirm=True``; OTA is risky — see ota.py.
+        """
+        from . import ota
+        if not confirm:
+            raise MP305Error("flash_ble() is experimental — pass confirm=True to proceed")
+        FEE1 = P.BLE_CHAR_FEE1
+
+        async def w(data):
+            await self._client.write_gatt_char(FEE1, bytes(data), response=True)
+
+        async def r() -> bytes:
+            return bytes(await self._client.read_gatt_char(FEE1))
+
+        async def wait_ok():
+            for _ in range(status_tries):
+                d = await r()
+                if d and d[0] == 0:
+                    return
+                await asyncio.sleep(status_delay)
+            raise MP305Error("BLE OTA: timed out waiting for FEE1 status")
+
+        await w([0x84, 18])                          # request boot info
+        info = ota.BootInfo.parse(await r())
+        if info.block_size <= 100:
+            raise MP305Error("BLE OTA: device is not in the BLE bootloader (no boot info)")
+
+        await w(firmware.erase_command(info.block_size))
+        await wait_ok()
+
+        total = len(firmware.firmware_data)
+        off = 0
+        while off < total:
+            await w(firmware.programme_command(off + firmware.min_addr, off))
+            await wait_ok()
+            off += firmware.programme_length(off)
+            if progress:
+                progress(min(off, total), total)
+
+        await w(firmware.checksum_command())
+        await wait_ok()
+        await w(firmware.end_command())
 
     # ---- danger zone -----------------------------------------------------
     async def reboot(self) -> None:

@@ -26,8 +26,11 @@ from .responses import (
     ProgramSteps,
     parse_pdo_item,
     decode_errors,
+    annotate_emark,
     BATTERY_TYPES,
     ERROR_LIST,
+    EMARK_SPEED,
+    EMARK_FORMAT,
     MODEL_DC,
     MODEL_PROGRAMMABLE,
     MODEL_USB_PD,
@@ -36,7 +39,7 @@ from .responses import (
 from . import protocol
 from . import commands
 from . import ota
-from .ota import Firmware, IntelHexFirmware
+from .ota import Firmware, IntelHexFirmware, BootInfo
 from .ble import MP305BLE   # safe to import even without bleak installed
 
 __all__ = [
@@ -44,9 +47,9 @@ __all__ = [
     "ControlCommand", "ChargeCommand", "SystemSetCommand",
     "State", "SystemSettings", "HardwareInfo",
     "ChargeState", "ChargeInfo", "PDO", "ProgramState", "ProgramList",
-    "ProgramEntry", "ProgramSteps", "parse_pdo_item", "decode_errors",
-    "BATTERY_TYPES", "ERROR_LIST",
+    "ProgramEntry", "ProgramSteps", "parse_pdo_item", "decode_errors", "annotate_emark",
+    "BATTERY_TYPES", "ERROR_LIST", "EMARK_SPEED", "EMARK_FORMAT",
     "MODEL_DC", "MODEL_PROGRAMMABLE", "MODEL_USB_PD", "MODEL_CHARGE",
-    "protocol", "commands", "ota", "Firmware", "IntelHexFirmware",
+    "protocol", "commands", "ota", "Firmware", "IntelHexFirmware", "BootInfo",
 ]
 __version__ = "0.2.0"

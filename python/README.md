@@ -65,10 +65,12 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `set_language(i)` | `0xA2` |
 | `read_charge_state()` / `read_charge_settings()` | `0xEC`→`0xED` / `0xEA`→`0xEB` (`ChargeState` / `ChargeInfo`) |
 | `charge(ChargeCommand)` | `0xEE` start/stop a battery charge |
-| `read_pdo(id)` / `pdo_connect(PDOConnect)` | `0xD0`→`0xD1` read PD profile / `0xE8`→`0xE9` select it |
+| `read_pdo(id)` / `pdo_connect(PDOConnect)` / `write_pdo(...)` | `0xD0`→`0xD1` read / `0xE8`→`0xE9` select / `0xD2`→`0xD3` define a PD profile |
 | `read_program_list()` / `read_program_steps(id, n)` | `0xD4`→`0xD5` / `0xD8`→`0xD9` |
 | `read_program_state()` / `program_connect(ProgramConnect)` | `0xDE`→`0xDF` / `0xE2`→`0xE3` run a sequence |
-| `flash(Firmware, confirm=True)` | **experimental** OTA (see warnings) |
+| `write_program(id, steps)` / `program_change(...)` | `0xDA`→`0xDB` write steps / `0xD6`→`0xD7` create/rename/delete slot |
+| `read_emarker()` | USB-C cable e-marker info (speed/format labelled) |
+| `flash(Firmware, confirm=True)` | **experimental** OTA over HID (see warnings) |
 | `reboot()` / `enter_bootloader()` | danger zone |
 | `send(cmd, payload)` / `request(cmd, expect, payload)` / `read_frame()` | raw access for any other command |
 
@@ -79,7 +81,8 @@ in **A**, `power` in **W**, `energy` in **Wh**, `temperature` in **°C**, `worki
 
 - **`MP305`** — synchronous, USB-HID (this table).
 - **`MP305BLE`** — the same API but `async` over Bluetooth (`bleak`); methods are coroutines
-  and connection is `await MP305BLE.open()`. See [`examples/ble.py`](./examples/ble.py).
+  and connection is `await MP305BLE.open()`. Adds `flash_ble(IntelHexFirmware, confirm=True)`
+  (experimental BLE OTA over `fee0/fee1`). See [`examples/ble.py`](./examples/ble.py).
 
 ### Firmware (`pymp305.ota`)
 

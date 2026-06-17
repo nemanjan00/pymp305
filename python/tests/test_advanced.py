@@ -122,6 +122,37 @@ def test_program_write_builder():
     assert (v, a, s) == (5000, 1000, 100)
 
 
+def test_write_builders_roundtrip():
+    # programmable write/change + pdo write produce frames that parse back with right cmds
+    cmd, pl = C.programmable_write(2, [{"V": 5.0, "A": 1.0, "S": 10}])
+    assert cmd == 0xDA
+    assert P.parse_report(bytes([P.REPORT_ID]) + P.build_frame(cmd, pl)).cmd == 0xDA
+    cmd, pl = C.programmable_change(2, "seqX", 1, is_last=1, remove=0)
+    assert cmd == 0xD6 and pl[1:17].rstrip(b"\x00") == b"seqX"
+    cmd, pl = C.pdo_write(3, "PD", 60, [{"type": 1, "voltage_v": 5.0, "current_a": 3.0}])
+    assert cmd == 0xD2
+    assert P.parse_report(bytes([P.REPORT_ID]) + P.build_frame(cmd, pl)).cmd == 0xD2
+
+
+def test_emark_annotate():
+    from pymp305.responses import annotate_emark
+    em = {"emark": 1, "speed": 2, "format": 1}
+    a = annotate_emark(em)
+    assert a["present"] is True
+    assert a["speed_label"] == "USB3.2/USB4 Gen2 (10Gbps/20Gbps)"
+    assert a["format_label"] == "V:2"
+    assert annotate_emark({"emark": 0, "speed": 99})["present"] is False
+
+
+def test_bootinfo_parse():
+    from pymp305 import ota
+    # [type=1('B'), offset(4 LE)=0x1000, blockSize lo,hi=0x00,0x08 ->2048, support, appid]
+    data = bytes([1, 0x00, 0x10, 0x00, 0x00, 0x00, 0x08, 0x01, 0x05])
+    bi = ota.BootInfo.parse(data)
+    assert bi.type == "B" and bi.offset == 0x1000 and bi.block_size == 2048
+    assert bi.support_0x85 == 1 and bi.app_id == 5
+
+
 def test_hardware_info_ble():
     # [0xE1, bleHwMaj, bleHwMin, bleSwMaj, bleSwMin, id(8), hw(4)]
     v = bytes([0xE1, 1, 2, 3, 4]) + bytes(range(8)) + bytes([5, 6, 7, 8])
