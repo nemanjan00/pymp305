@@ -1,0 +1,6 @@
+# MP305 GUI dependencies
+PyQt6>=6.6
+pyqtgraph>=0.13
+# the driver itself (use the sibling checkout, or: pip install pymp305)
+pymp305>=0.3
+hidapi>=0.14        # for the USB-HID backend (not needed for --demo)

@@ -4,6 +4,16 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.0
+
+### Added
+- **Desktop GUI** (`gui/`): a Dracula-themed PyQt6 + pyqtgraph dashboard around the library —
+  live V/I/W readouts, a CV/CC arc gauge, output toggle, set-point controls, rolling charts,
+  and a built-in **simulator** so it runs with no hardware. Kept as a separate package so the
+  core library stays Qt-free.
+
+(The `pymp305` library itself is unchanged from 0.3.0; this release adds the GUI + docs.)
+
 ## 0.3.0
 
 First release covering the whole MP305 line, a second transport, and the full advanced

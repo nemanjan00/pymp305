@@ -72,6 +72,7 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 - 🔎 **USB-C e-marker** — read the attached cable's e-marker (speed/format)
 - 📡 **USB *and* Bluetooth** — `MP305` over USB-HID, `MP305BLE` (async, `bleak`) over BLE — same API
 - 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing (HID & BLE)
+- 🖥️ **Desktop GUI** — Dracula-themed PyQt6 dashboard with live charts + a no-hardware simulator (see [`gui/`](./gui))
 - 🛟 **Safety-gated** — one-time untested-on-hardware warning; OTA behind an explicit `allow_untested_ota=True`
 - 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
 - 🧱 **Clean layers** — pure `protocol.py` framing shared by both transports
@@ -144,6 +145,18 @@ python python/examples/ota_inspect.py firmware.bin
 The decryptor is verified against ISDT's released MP305A/MP305B images (checksums pass and the
 decrypted ARM vector table + embedded model id check out). **OTA *writing* is still untested —
 see the banner.**
+
+## Desktop GUI
+
+A Dracula-themed PyQt6 dashboard in [`gui/`](./gui) — live V/I/W readouts, a CV/CC gauge,
+output toggle, set-point controls, and rolling charts. Runs against a real MP305 or a
+built-in simulator (the shot below is the simulator driving a CV→CC transition).
+
+![GUI screenshot](./gui/screenshot.png)
+
+```bash
+cd gui && pip install -r requirements.txt && python run.py --demo
+```
 
 ## Protocol at a glance
 

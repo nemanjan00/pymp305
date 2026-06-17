@@ -21,6 +21,8 @@ pip install pymp305[ble]     # + Bluetooth transport (bleak)
 
 From source (development): `pip install -e .` from this directory.
 
+A Dracula-themed **PyQt6 desktop GUI** (live charts + simulator) lives in [`../gui`](../gui).
+
 On Linux you'll need permission to access the hidraw node. Either run as root for a quick
 test, or add a udev rule (recommended):
 
