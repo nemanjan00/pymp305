@@ -20,7 +20,11 @@ import time
 from dataclasses import dataclass
 
 from . import protocol as P
-from .responses import HardwareInfo, State, SystemSettings
+from . import commands as C
+from .responses import (
+    HardwareInfo, State, SystemSettings,
+    ChargeState, ChargeInfo, PDO, ProgramState, ProgramList, ProgramSteps,
+)
 
 try:
     import hid  # cython-hidapi
@@ -255,6 +259,49 @@ class MP305:
 
     def set_language(self, index: int, timeout_ms: int = 1500) -> P.Frame:
         return self.request(P.CMD_SET_LANGUAGE, 0xA3, bytes([index & 0xFF]), timeout_ms)
+
+    # ---- charge mode -----------------------------------------------------
+    def read_charge_state(self, timeout_ms: int = 1500) -> ChargeState:
+        f = self.request(P.CMD_CHARGE_INFO, P.RESP_CHARGE, timeout_ms=timeout_ms)
+        return ChargeState.parse(f.values, index=5, device_name=self.device_name)
+
+    def read_charge_settings(self, timeout_ms: int = 1500) -> ChargeInfo:
+        f = self.request(P.CMD_CHARGE_SEARCH, P.RESP_CHARGE_INFO, timeout_ms=timeout_ms)
+        return ChargeInfo.parse(f.values, index=5)
+
+    # ---- USB-PD ----------------------------------------------------------
+    def read_pdo(self, pdo_id: int, timeout_ms: int = 1500) -> PDO:
+        cmd, payload = C.pdo_search(pdo_id)
+        f = self.request(cmd, P.RESP_PDO, payload, timeout_ms)
+        return PDO.parse(f.values, index=5)
+
+    def pdo_connect(self, conn: C.PDOConnect, timeout_ms: int = 1500) -> P.Frame:
+        cmd, payload = conn.build()
+        return self.request(cmd, P.RESP_PDO_CONNECT, payload, timeout_ms)
+
+    # ---- programmable sequences -----------------------------------------
+    def read_program_state(self, timeout_ms: int = 1500) -> ProgramState:
+        cmd, payload = C.programmable_info()
+        f = self.request(cmd, P.RESP_PROGRAM_STATE, payload, timeout_ms)
+        return ProgramState.parse(f.values, index=5)
+
+    def read_program_list(self, timeout_ms: int = 1500) -> ProgramList:
+        cmd, payload = C.programmable_list()
+        f = self.request(cmd, P.RESP_PROGRAM_LIST, payload, timeout_ms)
+        return ProgramList.parse(f.values, index=5)
+
+    def read_program_steps(self, seq_id: int, number: int, timeout_ms: int = 1500) -> ProgramSteps:
+        cmd, payload = C.programmable_read(seq_id)
+        f = self.request(cmd, P.RESP_PROGRAM_STEPS, payload, timeout_ms)
+        return ProgramSteps.parse(f.values, number, index=5)
+
+    def program_connect(self, conn: C.ProgramConnect, timeout_ms: int = 1500) -> P.Frame:
+        cmd, payload = conn.build()
+        return self.request(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout_ms)
+
+    def send_command(self, cmd_payload: tuple[int, bytes]) -> None:
+        """Send a (cmd, payload) tuple from the ``commands`` module without waiting."""
+        self.send(cmd_payload[0], cmd_payload[1])
 
     # ---- danger zone -----------------------------------------------------
     def reboot(self) -> None:

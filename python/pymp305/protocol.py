@@ -31,12 +31,19 @@ CMD_CHARGE_CONTROL = 0xEE   # -> 0xEF
 CMD_SET_LANGUAGE   = 0xA2   # -> 0xA3
 
 # response command bytes
-RESP_HW_INFO   = 0xE1
-RESP_STATE     = 0xC3
-RESP_SYS       = 0xC5
-RESP_SYS_SET   = 0xC7
-RESP_CONTROL   = 0xC9
-RESP_CHARGE    = 0xED
+RESP_HW_INFO        = 0xE1
+RESP_STATE          = 0xC3
+RESP_SYS            = 0xC5
+RESP_SYS_SET        = 0xC7
+RESP_CONTROL        = 0xC9
+RESP_CHARGE         = 0xED
+RESP_CHARGE_INFO    = 0xEB
+RESP_PDO            = 0xD1
+RESP_PDO_CONNECT    = 0xE9
+RESP_PROGRAM_LIST   = 0xD5
+RESP_PROGRAM_STEPS  = 0xD9
+RESP_PROGRAM_STATE  = 0xDF
+RESP_PROGRAM_CONNECT = 0xE3
 
 # raw multi-byte payloads for boot/reboot (cmd byte + extra data bytes)
 BOOT_PAYLOAD   = bytes([0xF0, 0xAC])   # jump to bootloader
@@ -132,3 +139,46 @@ def parse_report(raw: bytes) -> Frame | None:
     cmd = values[4]
     payload = bytes(values[5:-1])   # exclude the trailing checksum byte
     return Frame(cmd=cmd, payload=payload, values=bytes(values))
+
+
+# ---- BLE transport ------------------------------------------------------
+# Over BLE GATT the same command set is used, but frames drop the
+# length/0xAA/checksum wrapper: commands written to characteristic AF01 are just
+# [0x12, cmd, ...payload]; AF02 carries the binding/hardware-info handshake whose
+# frames start directly with the command byte (0x18/0x19/0xE0/0xE1).
+BLE_PARSE_INDEX = 2          # payload index for AF01 data frames ([0x12, cmd, ...])
+BLE_SERVICE_AF00 = "0000af00-0000-1000-8000-00805f9b34fb"
+BLE_CHAR_AF01    = "0000af01-0000-1000-8000-00805f9b34fb"   # command + notify
+BLE_CHAR_AF02    = "0000af02-0000-1000-8000-00805f9b34fb"   # binding / hw-info / chunked
+BLE_SERVICE_FEE0 = "0000fee0-0000-1000-8000-00805f9b34fb"   # OTA
+BLE_CHAR_FEE1    = "0000fee1-0000-1000-8000-00805f9b34fb"
+BLE_NAME_PREFIX  = "0000MP305"
+BLE_CMD_BIND     = 0x18      # -> 0x19
+BLE_CMD_BIND_RESP = 0x19
+
+
+def build_ble_frame(cmd: int, payload: bytes = b"") -> bytes:
+    """A BLE AF01 command frame: [0x12, cmd, ...payload] (no length/checksum)."""
+    return bytes([GROUP_ID, cmd]) + bytes(payload)
+
+
+def build_ble_binding(uuid16: bytes, fast_binding: int = 0, status: int = 0) -> bytes:
+    """The AF02 binding packet: [0x18, *uuid(16), fastBinding, status]."""
+    if len(uuid16) != 16:
+        raise ValueError("binding uuid must be 16 bytes")
+    return bytes([BLE_CMD_BIND, *uuid16, fast_binding & 0xFF, status & 0xFF])
+
+
+def parse_ble_notification(data: bytes) -> Frame | None:
+    """Parse a BLE notification.
+
+    AF01 data frames start with 0x12 → cmd at index 1, payload at index 2.
+    AF02 handshake frames (binding 0x19, hardware info 0xE1, …) start with the
+    command byte itself → cmd at index 0, payload at index 1.
+    """
+    b = bytes(data)
+    if len(b) < 1:
+        return None
+    if b[0] == GROUP_ID and len(b) >= 2:
+        return Frame(cmd=b[1], payload=b[2:], values=b)
+    return Frame(cmd=b[0], payload=b[1:], values=b)
