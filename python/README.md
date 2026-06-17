@@ -14,9 +14,10 @@ not published.)
 ## Install
 
 ```bash
-pip install hidapi          # the only runtime dependency
-pip install -e .            # from this directory
+pip install pymp305          # pulls in hidapi
 ```
+
+From source (development): `pip install -e .` from this directory.
 
 On Linux you'll need permission to access the hidraw node. Either run as root for a quick
 test, or add a udev rule (recommended):

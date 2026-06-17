@@ -6,6 +6,8 @@
 
 Control voltage, current, and output over USB — no app, no cloud, just Python.
 
+[![PyPI](https://img.shields.io/pypi/v/pymp305.svg)](https://pypi.org/project/pymp305/)
+[![tests](https://github.com/nemanjan00/pymp305/actions/workflows/test.yml/badge.svg)](https://github.com/nemanjan00/pymp305/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Transport: USB-HID](https://img.shields.io/badge/transport-USB--HID-success.svg)](./PROTOCOL.md)
@@ -63,12 +65,19 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 ## Install
 
 ```bash
-pip install hidapi
-pip install -e python/        # or: cd python && pip install -e .
+pip install pymp305
 ```
 
-Linux: add a udev rule so you don't need root —
+`hidapi` comes in as a dependency. Linux: add a udev rule so you don't need root —
 see [`python/README.md`](./python/README.md#install).
+
+<details><summary>From source (development)</summary>
+
+```bash
+git clone https://github.com/nemanjan00/pymp305 && cd pymp305/python
+pip install -e .
+```
+</details>
 
 ## Quick start
 
