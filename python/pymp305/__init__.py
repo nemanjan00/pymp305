@@ -35,9 +35,10 @@ from .responses import (
 )
 from . import protocol
 from . import commands
+from .ble import MP305BLE   # safe to import even without bleak installed
 
 __all__ = [
-    "MP305", "MP305A", "MP305B", "MP305Error", "MP305BError",
+    "MP305", "MP305A", "MP305B", "MP305Error", "MP305BError", "MP305BLE",
     "ControlCommand", "ChargeCommand", "SystemSetCommand",
     "State", "SystemSettings", "HardwareInfo",
     "ChargeState", "ChargeInfo", "PDO", "ProgramState", "ProgramList",
