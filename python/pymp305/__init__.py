@@ -52,4 +52,4 @@ __all__ = [
     "MODEL_DC", "MODEL_PROGRAMMABLE", "MODEL_USB_PD", "MODEL_CHARGE",
     "protocol", "commands", "ota", "Firmware", "IntelHexFirmware", "BootInfo",
 ]
-__version__ = "0.4.0"
+__version__ = "0.4.1"

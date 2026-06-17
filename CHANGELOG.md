@@ -4,6 +4,15 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.1
+
+### Changed
+- **GUI v2** (`gui/`): redesigned for **trackball-only / no-keyboard** use — stepper-chip
+  setpoints, scroll-to-nudge, one-click presets, and an on-screen **keypad with digit + unit
+  buttons** (V/mV, A/mA). Dual CV/CC arc gauges with a fused CV/CC tag (replaces the empty
+  card), status lamps (OUT/CV/CC/OVP/OCP), an event log, and disciplined layout (controls keep
+  natural height; the chart absorbs slack). (Library unchanged.)
+
 ## 0.4.0
 
 ### Added
