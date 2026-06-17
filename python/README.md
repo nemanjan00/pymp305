@@ -89,6 +89,17 @@ in **A**, `power` in **W**, `energy` in **Wh**, `temperature` in **°C**, `worki
 - `tools/fetch_firmware.py` downloads + decrypts official images into git-ignored `reversing/`.
 - OTA *writing* is experimental and untested on hardware — see the repo banner.
 
+### Experimental / undisclosed commands
+
+Reverse-engineered from the firmware (handled by the device but never sent by the official
+app). **Untested on hardware** — see notes in `reversing/FINDINGS-commands.md`.
+
+- **`get_language()`** — read the UI language index (cmd `0xA0`→`0xA1`), the read counterpart
+  of `set_language()`. Read-only; the safe first probe.
+- **`soft_reset(confirm=True)`** — magic-gated (`0xFE AA 55`) soft re-init of the regulator/
+  USB-PD state to defaults + control-task restart. Static analysis shows no flash/NVM access
+  (can't brick), but it resets the live output, so it's gated behind `confirm=True`.
+
 ## Bring-up checklist (first run with hardware)
 
 1. `python -c "from pymp305 import MP305; print(MP305.list_devices())"` — confirm the

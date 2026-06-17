@@ -248,6 +248,21 @@ class MP305BLE:
     async def set_language(self, index: int, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_SET_LANGUAGE, 0xA3, bytes([index & 0xFF]), timeout)
 
+    # ---- experimental / undisclosed (reverse-engineered, UNTESTED) -------
+    async def get_language(self, timeout: float = 2.0) -> int:
+        """[experimental] Read the UI language index (undisclosed cmd 0xA0 → 0xA1)."""
+        f = await self.request(P.CMD_GET_LANGUAGE, P.RESP_GET_LANGUAGE, timeout=timeout)
+        return f.payload[0] if f.payload else -1
+
+    async def soft_reset(self, *, confirm: bool = False, timeout: float = 2.0) -> bool:
+        """[experimental] Magic-gated soft re-init of the regulator/USB-PD state (cmd 0xFE,
+        payload AA 55). No flash access (can't brick) but resets the live output; gated
+        behind confirm=True. See reversing/FINDINGS-commands.md."""
+        if not confirm:
+            raise MP305Error("soft_reset() is experimental — pass confirm=True to proceed")
+        f = await self.request(P.CMD_SOFT_RESET, P.RESP_SOFT_RESET, P.SOFT_RESET_MAGIC, timeout)
+        return f.payload[:2] == P.SOFT_RESET_MAGIC
+
     # ---- danger zone -----------------------------------------------------
     async def reboot(self) -> None:
         await self.send(P.REBOOT_PAYLOAD[0], P.REBOOT_PAYLOAD[1:])

@@ -29,6 +29,11 @@ CMD_CHARGE_INFO    = 0xEC   # -> 0xED
 CMD_CHARGE_SEARCH  = 0xEA   # -> 0xEB
 CMD_CHARGE_CONTROL = 0xEE   # -> 0xEF
 CMD_SET_LANGUAGE   = 0xA2   # -> 0xA3
+# Undisclosed commands (reverse-engineered from firmware, not used by WebLink).
+# See reversing/FINDINGS-commands.md. UNTESTED on hardware.
+CMD_GET_LANGUAGE   = 0xA0   # -> 0xA1  read counterpart of set-language
+CMD_SOFT_RESET     = 0xFE   # -> 0xFF  magic-gated soft re-init of regulator/PD state
+SOFT_RESET_MAGIC   = b"\xAA\x55"
 
 # response command bytes
 RESP_HW_INFO        = 0xE1
@@ -44,6 +49,8 @@ RESP_PROGRAM_LIST   = 0xD5
 RESP_PROGRAM_STEPS  = 0xD9
 RESP_PROGRAM_STATE  = 0xDF
 RESP_PROGRAM_CONNECT = 0xE3
+RESP_GET_LANGUAGE   = 0xA1
+RESP_SOFT_RESET     = 0xFF
 
 # raw multi-byte payloads for boot/reboot (cmd byte + extra data bytes)
 BOOT_PAYLOAD   = bytes([0xF0, 0xAC])   # jump to bootloader
@@ -136,6 +143,10 @@ def parse_report(raw: bytes) -> Frame | None:
 
     if len(values) < 6:
         return None
+    # values[0] = N = frame length excluding itself; truncate any report zero-padding.
+    n = values[0]
+    if 6 <= n + 1 <= len(values):
+        values = values[: n + 1]
     cmd = values[4]
     payload = bytes(values[5:-1])   # exclude the trailing checksum byte
     return Frame(cmd=cmd, payload=payload, values=bytes(values))

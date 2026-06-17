@@ -303,6 +303,29 @@ class MP305:
         """Send a (cmd, payload) tuple from the ``commands`` module without waiting."""
         self.send(cmd_payload[0], cmd_payload[1])
 
+    # ---- experimental / undisclosed (reverse-engineered, UNTESTED) -------
+    # Handled by the firmware but never sent by the official app; behaviour inferred
+    # from disassembly — see reversing/FINDINGS-commands.md.
+    def get_language(self, timeout_ms: int = 1500) -> int:
+        """[experimental] Read the UI language index — the read counterpart of
+        ``set_language()`` (undisclosed cmd 0xA0 → 0xA1). Returns the language byte."""
+        f = self.request(P.CMD_GET_LANGUAGE, P.RESP_GET_LANGUAGE, timeout_ms=timeout_ms)
+        return f.payload[0] if f.payload else -1
+
+    def soft_reset(self, *, confirm: bool = False, timeout_ms: int = 1500) -> bool:
+        """[experimental] Magic-gated soft re-init: resets the regulator/USB-PD control
+        state to factory defaults and restarts the control task (undisclosed cmd 0xFE,
+        payload ``AA 55``, resp 0xFF).
+
+        Static analysis of the whole call tree shows **no flash/NVM access** — it cannot
+        brick the unit — but it interrupts and resets the **live output**, so it is gated
+        behind ``confirm=True``. Returns True if the device echoed the magic (accepted).
+        """
+        if not confirm:
+            raise MP305Error("soft_reset() is experimental — pass confirm=True to proceed")
+        f = self.request(P.CMD_SOFT_RESET, P.RESP_SOFT_RESET, P.SOFT_RESET_MAGIC, timeout_ms)
+        return f.payload[:2] == P.SOFT_RESET_MAGIC
+
     # ---- danger zone -----------------------------------------------------
     def reboot(self) -> None:
         self.send_raw_payload(P.REBOOT_PAYLOAD)
