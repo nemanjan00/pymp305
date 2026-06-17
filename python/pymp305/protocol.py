@@ -1,4 +1,4 @@
-"""Wire-protocol framing for the ISDT MP305B over USB-HID.
+"""Wire-protocol framing for the ISDT MP305 (MP305A / MP305B) over USB-HID.
 
 Transcribed from the official WebLink web app (see ../../PROTOCOL.md). All framing
 quirks (length byte, 0xAA stuffing, checksum) are reproduced exactly so the

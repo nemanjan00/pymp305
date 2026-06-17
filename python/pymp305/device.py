@@ -1,11 +1,14 @@
-"""High-level driver for the ISDT MP305B over USB-HID.
+"""High-level driver for the ISDT MP305 (MP305A / MP305B) over USB-HID.
+
+Both models share the same controller and protocol; the only model-specific behaviour is
+error-bit decoding, handled automatically once the device name is read.
 
 Requires the `hid` package (cython-hidapi):  pip install hidapi
 
 Example
 -------
-    from pymp305b import MP305B
-    with MP305B.open() as psu:
+    from pymp305 import MP305
+    with MP305.open() as psu:
         print(psu.hardware_info())
         psu.set_output(voltage=5.0, current=1.0, on=True)
         print(psu.read_state())
@@ -25,7 +28,7 @@ except ImportError:  # pragma: no cover
     hid = None
 
 
-class MP305BError(Exception):
+class MP305Error(Exception):
     pass
 
 
@@ -110,31 +113,35 @@ class SystemSetCommand:
         return buf
 
 
-class MP305B:
+class MP305:
+    """Driver for an ISDT MP305A or MP305B. The concrete model is auto-detected from the
+    device name on the first `hardware_info()` call and used for error decoding."""
+
     def __init__(self, device, report_size: int = P.REPORT_SIZE):
         self._dev = device
         self._report_size = report_size
+        self.device_name: str | None = None   # "MP305A" / "MP305B", set by hardware_info()
 
     # ---- connection ------------------------------------------------------
     @staticmethod
     def list_devices() -> list[dict]:
         if hid is None:
-            raise MP305BError("the 'hidapi' package is not installed (pip install hidapi)")
+            raise MP305Error("the 'hidapi' package is not installed (pip install hidapi)")
         return [d for d in hid.enumerate() if d["vendor_id"] == P.VENDOR_ID]
 
     @classmethod
-    def open(cls, path: bytes | None = None, serial: str | None = None) -> "MP305B":
-        """Open the MP305B. Picks the HID interface with usage_page 0x01 / usage 0x04
+    def open(cls, path: bytes | None = None, serial: str | None = None) -> "MP305":
+        """Open the MP305. Picks the HID interface with usage_page 0x01 / usage 0x04
         when several interfaces from VID 0x28E9 are present."""
         if hid is None:
-            raise MP305BError("the 'hidapi' package is not installed (pip install hidapi)")
+            raise MP305Error("the 'hidapi' package is not installed (pip install hidapi)")
         dev = hid.device()
         if path is not None:
             dev.open_path(path)
         else:
             candidates = cls.list_devices()
             if not candidates:
-                raise MP305BError(f"no device with VID 0x{P.VENDOR_ID:04X} found")
+                raise MP305Error(f"no device with VID 0x{P.VENDOR_ID:04X} found")
             preferred = [c for c in candidates
                          if c.get("usage_page") == P.HID_USAGE_PAGE
                          and c.get("usage") == P.HID_USAGE]
@@ -160,7 +167,7 @@ class MP305B:
         report = P.build_report(cmd, payload, self._report_size)
         n = self._dev.write(report)
         if n < 0:
-            raise MP305BError("HID write failed")
+            raise MP305Error("HID write failed")
 
     def send_raw_payload(self, payload: bytes) -> None:
         """Send a payload whose first byte is the command byte (e.g. BOOT/REBOOT)."""
@@ -183,18 +190,21 @@ class MP305B:
                 continue
             if frame.cmd == expect:
                 return frame
-        raise MP305BError(f"timed out waiting for response 0x{expect:02X} to 0x{cmd:02X}")
+        raise MP305Error(f"timed out waiting for response 0x{expect:02X} to 0x{cmd:02X}")
 
     # ---- high-level reads ------------------------------------------------
     def hardware_info(self, timeout_ms: int = 1500) -> HardwareInfo:
         f = self.request(P.CMD_HW_INFO, P.RESP_HW_INFO, timeout_ms=timeout_ms)
-        return HardwareInfo.parse(f.values)
+        info = HardwareInfo.parse(f.values)
+        if info.device_name:
+            self.device_name = info.device_name   # cache for model-aware error decoding
+        return info
 
     def read_state(self, realtime: bool = True, timeout_ms: int = 1500) -> State:
         """Read the live measurement/state frame (0xC3)."""
         cmd = P.CMD_REALTIME if realtime else P.CMD_STATE_INFO
         f = self.request(cmd, P.RESP_STATE, timeout_ms=timeout_ms)
-        return State.parse(f.values)
+        return State.parse(f.values, device_name=self.device_name)
 
     def read_system_settings(self, timeout_ms: int = 1500) -> SystemSettings:
         f = self.request(P.CMD_SYS_GET, P.RESP_SYS, timeout_ms=timeout_ms)
@@ -252,3 +262,10 @@ class MP305B:
 
     def enter_bootloader(self) -> None:
         self.send_raw_payload(P.BOOT_PAYLOAD)
+
+
+# Both models share this driver; aliases for discoverability / explicit intent.
+MP305A = MP305
+MP305B = MP305
+# Backwards-compatible error alias.
+MP305BError = MP305Error

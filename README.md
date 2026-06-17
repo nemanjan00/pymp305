@@ -1,8 +1,8 @@
 <div align="center">
 
-# ⚡ pymp305b
+# ⚡ pymp305
 
-**An unofficial Python driver for the [ISDT MP305B](https://www.isdt.co/) smart bench power supply.**
+**An unofficial Python driver for the [ISDT MP305](https://www.isdt.co/) smart bench power supplies — both MP305A and MP305B.**
 
 Control voltage, current, and output over USB — no app, no cloud, just Python.
 
@@ -10,28 +10,40 @@ Control voltage, current, and output over USB — no app, no cloud, just Python.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Transport: USB-HID](https://img.shields.io/badge/transport-USB--HID-success.svg)](./PROTOCOL.md)
 
-```text
-   ┌─────────────────────────────┐
-   │  ISDT MP305B   30V · 5A · 305W│        USB-C / HID          ╔═══════════╗
-   │   ┌───────┐  ┌────┐  ┌────┐  │  ◀───────────────────────▶  ║  Python   ║
-   │   │ 12.34V│  │1.50A│  │18.5W│ │     VID 0x28E9 · rep 1      ║ pymp305b  ║
-   │   └───────┘  └────┘  └────┘  │                             ╚═══════════╝
-   └─────────────────────────────┘
-```
-
 </div>
+
+```mermaid
+flowchart LR
+    subgraph PSU["ISDT MP305A / MP305B  ·  30V · 5A · 305W"]
+        direction TB
+        D["DP3005 controller"]
+    end
+    subgraph PY["your machine"]
+        direction TB
+        A["pymp305"]
+        H["hidapi"]
+        A --- H
+    end
+    PSU <-- "USB-C · HID&nbsp;&nbsp;VID 0x28E9 · report 1" --> PY
+
+    classDef psu fill:#0d1117,stroke:#f0883e,color:#f0883e;
+    classDef py fill:#0d1117,stroke:#3fb950,color:#3fb950;
+    class PSU,D psu;
+    class PY,A,H py;
+```
 
 ---
 
 ## Why
 
-The MP305B is a slick little programmable PSU, but the only ways to drive it are ISDT's
+The MP305 is a slick little programmable PSU, but the only ways to drive it are ISDT's
 phone app (BLE) and their [WebLink](https://www.isdt.co/weblink/) web app (WebHID).
 This library speaks the **same USB-HID protocol the web app uses**, so you can script your
 bench from Python: automated test rigs, battery cycling, data logging, CI for hardware.
 
-The protocol was reverse-engineered from WebLink's *public* source-maps and is fully
-documented in **[PROTOCOL.md](./PROTOCOL.md)**.
+**MP305A and MP305B share one controller and protocol** — the same code drives both. The
+only model-specific behaviour (a few error-code mappings) is detected automatically from
+the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.md)**.
 
 > ⚠️ **Heads-up:** the framing/decoding layer is covered by passing golden-vector tests,
 > but this has **not yet been validated against physical hardware**. First-run bring-up
@@ -43,6 +55,7 @@ documented in **[PROTOCOL.md](./PROTOCOL.md)**.
 - 🎛️ **Full PSU control** — set V/I, toggle output, take/release remote control
 - 📈 **Live telemetry** — voltage, current, power, energy, temperature, runtime, errors
 - 🔋 **Charge mode** — battery charging by chemistry / cells / current
+- 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
 - 🧱 **Clean layers** — pure `protocol.py` framing you can reuse over BLE too
 - 🧪 **Tested without hardware** — checksum/stuffing/units verified by golden vectors
 - 🪪 **MIT licensed**, no ISDT code shipped (see *Clean-room* below)
@@ -60,10 +73,10 @@ see [`python/README.md`](./python/README.md#install).
 ## Quick start
 
 ```python
-from pymp305b import MP305B
+from pymp305 import MP305
 
-with MP305B.open() as psu:
-    print(psu.hardware_info())                      # name + firmware versions
+with MP305.open() as psu:
+    print(psu.hardware_info())                      # name (MP305A/B) + firmware versions
 
     psu.set_output(voltage=5.0, current=1.0, on=True)   # remote control + output ON
 
@@ -74,7 +87,8 @@ with MP305B.open() as psu:
     psu.release_remote()                            # give the front panel control back
 ```
 
-Live-streaming example: [`python/examples/basic.py`](./python/examples/basic.py).
+`MP305A` and `MP305B` are aliases of `MP305` if you prefer to be explicit. Live-streaming
+example: [`python/examples/basic.py`](./python/examples/basic.py).
 
 ## Protocol at a glance
 
@@ -93,12 +107,12 @@ Full field-level spec, units, and error tables: **[PROTOCOL.md](./PROTOCOL.md)**
 ## Repo layout
 
 ```
-pymp305b/
+isdt-mp305/
 ├── PROTOCOL.md                 # the wire protocol, documented
 ├── tools/
 │   └── fetch_weblink_sources.py# reproduce the RE material from ISDT's public source-maps
 ├── python/
-│   ├── pymp305b/               # the library (protocol · responses · device)
+│   ├── pymp305/                # the library (protocol · responses · device)
 │   ├── examples/basic.py
 │   └── tests/test_protocol.py  # golden-vector framing tests (no hardware needed)
 └── reversing/                  # ← git-ignored: recovered ISDT source, kept local only
@@ -129,5 +143,5 @@ copyrightable; the implementation here is independent.
 
 ## License
 
-[MIT](./LICENSE) — *Not affiliated with or endorsed by ISDT. "MP305B" and "ISDT" are
-trademarks of their respective owner.*
+[MIT](./LICENSE) — *Not affiliated with or endorsed by ISDT. "MP305", "MP305A", "MP305B"
+and "ISDT" are trademarks of their respective owner.*

@@ -1,18 +1,18 @@
-"""Basic MP305B session. Connect over USB, print info, set 5 V / 1 A, enable output,
-then stream live readings. Run with the device plugged in via USB-C."""
+"""Basic MP305 (MP305A/MP305B) session. Connect over USB, print info, set 5 V / 1 A,
+enable output, then stream live readings. Run with the device plugged in via USB-C."""
 import time
 
-from pymp305b import MP305B
+from pymp305 import MP305
 
 
 def main():
-    print("MP305B HID interfaces found:")
-    for d in MP305B.list_devices():
+    print("MP305 HID interfaces found:")
+    for d in MP305.list_devices():
         print(f"  VID 0x{d['vendor_id']:04X} PID 0x{d['product_id']:04X} "
               f"usage_page=0x{d.get('usage_page', 0):02X} usage=0x{d.get('usage', 0):02X} "
               f"path={d['path']}")
 
-    with MP305B.open() as psu:
+    with MP305.open() as psu:
         info = psu.hardware_info()
         print(f"\nDevice : {info.device_name}")
         print(f"HW {info.hardware_version}  boot {info.boot_version}  app {info.app_version}")

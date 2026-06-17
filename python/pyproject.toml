@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pymp305b"
+name = "pymp305"
 version = "0.1.0"
-description = "Python driver for the ISDT MP305B smart bench power supply (USB-HID)"
+description = "Python driver for the ISDT MP305 (MP305A/MP305B) smart bench power supply over USB-HID"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -15,4 +15,4 @@ dependencies = ["hidapi>=0.14"]
 test = ["pytest"]
 
 [tool.setuptools]
-packages = ["pymp305b"]
+packages = ["pymp305"]

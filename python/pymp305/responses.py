@@ -1,5 +1,5 @@
-"""Parsers for MP305B response frames. Offsets/units transcribed from the WebLink
-source (DP3005Resp.js, dpstateResp.js, hardwareInfoResp.js, constant.js)."""
+"""Parsers for ISDT MP305 (MP305A / MP305B) response frames. Offsets/units transcribed
+from the WebLink source (DP3005Resp.js, dpstateResp.js, hardwareInfoResp.js, constant.js)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,8 +27,29 @@ def _u16(b, i): return b[i] | (b[i + 1] << 8)
 def _u32(b, i): return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)
 
 
-def decode_errors(mask: int) -> list[str]:
-    return [ERROR_LIST[i] for i in range(len(ERROR_LIST)) if mask & (1 << i)]
+# Non-MP305B devices (e.g. MP305A) remap a few low error bits — from constant.js getByteType.
+SPECIAL_ERRORS = {1: "errorUnknown", 2: "errorUnknown", 3: "errorBattTemp_H_A"}
+
+
+def decode_errors(mask: int, device_name: str | None = None,
+                  charge_mode: bool = False) -> list[str]:
+    """Decode a charge-error bitmask to error names, MP305A/MP305B-aware.
+
+    Mirrors WebLink's `getByteType`: the meaningful bit-width is 17 in charge mode
+    (model 3) and 9 otherwise; MP305B maps bits straight to `ERROR_LIST` while other
+    models remap bits 1-3 via `SPECIAL_ERRORS`.
+    """
+    if not mask:
+        return []
+    width = 17 if charge_mode else 9
+    names: list[str] = []
+    for i in range(min(width, len(ERROR_LIST))):
+        if not (mask & (1 << i)):
+            continue
+        name = ERROR_LIST[i] if device_name == "MP305B" else (SPECIAL_ERRORS.get(i) or ERROR_LIST[i])
+        if name:
+            names.append(name)
+    return names
 
 
 @dataclass
@@ -59,7 +80,8 @@ class State:
     raw: bytes = b""
 
     @classmethod
-    def parse(cls, frame_values: bytes, index: int = 5) -> "State":
+    def parse(cls, frame_values: bytes, index: int = 5,
+              device_name: str | None = None) -> "State":
         v = frame_values
         i = index
         s = cls(raw=bytes(v))
@@ -84,7 +106,8 @@ class State:
         # optional trailing fields, gated on the length byte (values[0]) like the JS
         if v[0] > 34 and i + 1 < len(v):
             s.charge_error = _u16(v, i); i += 2
-            s.errors = decode_errors(s.charge_error)
+            s.errors = decode_errors(s.charge_error, device_name,
+                                     charge_mode=(s.model == MODEL_CHARGE))
         if v[0] > 36 and i + 4 < len(v):
             s.wave_pause = _u8(v, i); i += 1
             s.wave_time = _u32(v, i); i += 4

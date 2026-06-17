@@ -1,4 +1,4 @@
-# ISDT MP305B — wire protocol (reverse-engineered)
+# ISDT MP305 (MP305A / MP305B) — wire protocol (reverse-engineered)
 
 Source of truth: the official **WebLink** web app (`https://www.isdt.co/weblink/`) ships
 with public source-maps. The original (un-minified) source was recovered and the protocol
@@ -6,8 +6,10 @@ below is transcribed from it. That recovered material is ISDT's copyright, so it
 **locally only** under `reversing/` (git-ignored, not published). This document describes
 the wire protocol as factual interoperability information.
 
-Internally the MP305B is a **"DP3005"** PSU controller (30 V / 5 A / 305 W). It speaks the
-same protocol over two transports:
+Both **MP305A** and **MP305B** use the same **"DP3005"** PSU controller (30 V / 5 A /
+305 W) and speak an identical command set. The only model-specific difference observed is
+how a few low error bits are named (see *State response* below). It speaks the same
+protocol over two transports:
 
 | Transport | How the official app uses it | Framing |
 |-----------|------------------------------|---------|
@@ -123,6 +125,12 @@ waveTime     u32
 errorBattTemp_H, errorBoardTemp_H, errorDcOutOCP, errorDcOutOVP, errorDICInitFail,
 errorDcOutVol, errorTimeOut, errorConnectionBroken, errorBatteryOver, errorBatteryLow,
 errorCellsNode, errorNoBattery, errorCapacity, errorUnknown`.
+
+**Model-specific decode** (`getByteType` in `constant.js`): the meaningful bit-width is
+**17** in charge mode (`model == 3`) and **9** otherwise. **MP305B** maps each set bit
+straight to `errorLists`. Other models (e.g. **MP305A**) remap the low bits:
+`bit1 → errorUnknown, bit2 → errorUnknown, bit3 → errorBattTemp_H_A`, falling back to
+`errorLists` for the rest. `pymp305` does this automatically once the device name is read.
 
 ## System-settings response `0xC5` (`DPStateResp`)
 ```

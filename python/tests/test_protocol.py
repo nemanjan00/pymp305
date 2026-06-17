@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pymp305b import protocol as P
-from pymp305b.device import ControlCommand
-from pymp305b.responses import State
+from pymp305 import protocol as P
+from pymp305.device import ControlCommand
+from pymp305.responses import State, decode_errors
 
 
 def test_info_frame_golden():
@@ -96,6 +96,21 @@ def test_0xAA_stuffing_roundtrip():
     parsed = P.parse_report(bytes([P.REPORT_ID]) + frame)
     assert parsed.cmd == 0x55
     assert parsed.payload == payload
+
+
+def test_model_aware_error_decode():
+    # bit 3 set: MP305B -> errorBattTemp_H ; MP305A (other) -> errorBattTemp_H_A
+    mask = 1 << 3
+    assert decode_errors(mask, "MP305B") == ["errorBattTemp_H"]
+    assert decode_errors(mask, "MP305A") == ["errorBattTemp_H_A"]
+    # bit 1: MP305A remaps to errorUnknown
+    assert decode_errors(1 << 1, "MP305B") == ["errorBattVolt"]
+    assert decode_errors(1 << 1, "MP305A") == ["errorUnknown"]
+    # non-charge mode only looks at the low 9 bits; charge mode (17) sees higher bits
+    high = 1 << 12   # errorBatteryLow
+    assert decode_errors(high, "MP305B", charge_mode=False) == []
+    assert decode_errors(high, "MP305B", charge_mode=True) == ["errorBatteryLow"]
+    assert decode_errors(0, "MP305B") == []
 
 
 if __name__ == "__main__":
