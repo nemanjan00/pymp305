@@ -6,7 +6,26 @@ checksums match what the firmware expects.
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
+
+# Flip to True (with a release) once the library is validated against real hardware.
+HARDWARE_VALIDATED = False
+_warned_untested = False
+
+
+def warn_untested() -> None:
+    """Emit a one-time UserWarning that this library is not yet hardware-validated."""
+    global _warned_untested
+    if HARDWARE_VALIDATED or _warned_untested:
+        return
+    _warned_untested = True
+    warnings.warn(
+        "pymp305 has NOT been validated against real MP305 hardware yet — behaviour may be "
+        "incorrect. Sanity-check readings, and use the OTA/flash and soft_reset paths with "
+        "care. See https://github.com/nemanjan00/pymp305",
+        UserWarning, stacklevel=3,
+    )
 
 # USB-HID identity (from HIDDeviceManager.connect)
 VENDOR_ID = 0x28E9          # GigaDevice

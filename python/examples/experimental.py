@@ -23,7 +23,7 @@ def main():
 
         # NOT called here (state-changing / privileged):
         #   psu.soft_reset(confirm=True)   # 0xFE AA 55 — resets regulator state
-        #   psu.flash(firmware, confirm=True)
+        #   psu.flash(firmware, allow_untested_ota=True)
 
 
 if __name__ == "__main__":

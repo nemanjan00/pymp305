@@ -156,6 +156,7 @@ class MP305:
             dev.set_nonblocking(0)
         except Exception:
             pass
+        P.warn_untested()
         return cls(dev)
 
     def close(self):
@@ -373,19 +374,21 @@ class MP305:
                 return f
         raise MP305Error(f"OTA: timed out waiting for 0x{expect:02X}")
 
-    def flash(self, firmware, *, confirm: bool = False, progress=None,
+    def flash(self, firmware, *, allow_untested_ota: bool = False, progress=None,
               boot_delay_s: float = 4.0) -> None:
         """EXPERIMENTAL, UNTESTED firmware flash over USB-HID.
 
         `firmware` is an ``ota.Firmware``. This enters the bootloader, erases, writes the
         app (and data) region driven by device acks, verifies, and reboots. A failed app
         write is normally recoverable by re-flashing (the bootloader is not touched), but
-        OTA is inherently risky — you must pass ``confirm=True``. `progress(done, total)`
-        is called as bytes are written.
+        this path has **never run against real hardware** — you must explicitly pass
+        ``allow_untested_ota=True`` to accept the brick risk. `progress(done, total)` is
+        called as bytes are written.
         """
         from . import ota
-        if not confirm:
-            raise MP305Error("flash() is experimental — pass confirm=True to proceed")
+        if not allow_untested_ota:
+            raise MP305Error("flash() is EXPERIMENTAL and untested on hardware — pass "
+                             "allow_untested_ota=True to proceed (you accept the brick risk)")
         idx = 4  # HID addressId
 
         def report(done):

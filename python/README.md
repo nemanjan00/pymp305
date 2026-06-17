@@ -70,7 +70,7 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `read_program_state()` / `program_connect(ProgramConnect)` | `0xDE`→`0xDF` / `0xE2`→`0xE3` run a sequence |
 | `write_program(id, steps)` / `program_change(...)` | `0xDA`→`0xDB` write steps / `0xD6`→`0xD7` create/rename/delete slot |
 | `read_emarker()` | USB-C cable e-marker info (speed/format labelled) |
-| `flash(Firmware, confirm=True)` | **experimental** OTA over HID (see warnings) |
+| `flash(Firmware, allow_untested_ota=True)` | **experimental** OTA over HID (see warnings) |
 | `reboot()` / `enter_bootloader()` | danger zone |
 | `send(cmd, payload)` / `request(cmd, expect, payload)` / `read_frame()` | raw access for any other command |
 
@@ -81,7 +81,7 @@ in **A**, `power` in **W**, `energy` in **Wh**, `temperature` in **°C**, `worki
 
 - **`MP305`** — synchronous, USB-HID (this table).
 - **`MP305BLE`** — the same API but `async` over Bluetooth (`bleak`); methods are coroutines
-  and connection is `await MP305BLE.open()`. Adds `flash_ble(IntelHexFirmware, confirm=True)`
+  and connection is `await MP305BLE.open()`. Adds `flash_ble(IntelHexFirmware, allow_untested_ota=True)`
   (experimental BLE OTA over `fee0/fee1`). See [`examples/ble.py`](./examples/ble.py).
 
 ### Firmware (`pymp305.ota`)

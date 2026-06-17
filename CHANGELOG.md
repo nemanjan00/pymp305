@@ -19,7 +19,7 @@ Big feature release: a second transport plus the full advanced command surface.
 - **E-marker**: `read_emarker()` (USB-C cable info with speed/format labels).
 - **OTA + firmware**: `ota.Firmware` (decrypt + verify the encrypted `.bin`; validated against
   ISDT's released MP305A/MP305B images), `ota.IntelHexFirmware`, `ota.BootInfo`,
-  experimental `MP305.flash()` (HID) and `MP305BLE.flash_ble()` (BLE FEE1), all `confirm`-gated.
+  experimental `MP305.flash()` (HID) and `MP305BLE.flash_ble()` (BLE FEE1), gated behind `allow_untested_ota=True`.
 - **Experimental/undisclosed commands** (reverse-engineered): `get_language()` (`0xA0`),
   `soft_reset()` (`0xFE`, magic-gated, confirmed non-destructive).
 - **MP305A + MP305B** in one driver (`MP305`, with `MP305A`/`MP305B` aliases); model

@@ -73,7 +73,7 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 - 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing
 - 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
 - 🧱 **Clean layers** — pure `protocol.py` framing shared by both transports
-- 🧪 **Tested without hardware** — checksum/stuffing/units/firmware-decrypt verified by golden vectors
+- 🧪 **Golden-vector tested** (framing/units/firmware-decrypt) — **hardware validation pending**
 - 🪪 **MIT licensed**, no ISDT code shipped (see *Clean-room* below)
 
 ## Install

@@ -96,6 +96,7 @@ class MP305BLE:
         await client.start_notify(P.BLE_CHAR_AF02, self._on_notify)
         if bind:
             await self._bind()
+        P.warn_untested()
         return self
 
     async def close(self):
@@ -284,19 +285,20 @@ class MP305BLE:
         return f.payload[:2] == P.SOFT_RESET_MAGIC
 
     # ---- OTA over BLE (experimental, untested) ---------------------------
-    async def flash_ble(self, firmware, *, confirm: bool = False, progress=None,
+    async def flash_ble(self, firmware, *, allow_untested_ota: bool = False, progress=None,
                         status_tries: int = 60, status_delay: float = 0.05) -> None:
         """EXPERIMENTAL, UNTESTED BLE OTA over the FEE0/FEE1 service.
 
         `firmware` is an ``ota.IntelHexFirmware``. **Requires the device to already be in
         the BLE bootloader** (FEE1 present) — typically after `enter_bootloader()` + a
         reconnect. Drives the FEE1 state machine: read boot-info → erase → programme loop →
-        checksum → end, polling FEE1 (`readback[0]==0` = step ok). Gated behind
-        ``confirm=True``; OTA is risky — see ota.py.
+        checksum → end, polling FEE1 (`readback[0]==0` = step ok). Never run on real
+        hardware — pass ``allow_untested_ota=True`` to accept the brick risk. See ota.py.
         """
         from . import ota
-        if not confirm:
-            raise MP305Error("flash_ble() is experimental — pass confirm=True to proceed")
+        if not allow_untested_ota:
+            raise MP305Error("flash_ble() is EXPERIMENTAL and untested on hardware — pass "
+                             "allow_untested_ota=True to proceed (you accept the brick risk)")
         FEE1 = P.BLE_CHAR_FEE1
 
         async def w(data):

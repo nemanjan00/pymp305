@@ -66,6 +66,24 @@ def test_soft_reset_reports_not_accepted():
     assert MP305(dev).soft_reset(confirm=True) is False
 
 
+def test_flash_gated_without_allow_untested_ota():
+    psu = MP305(FakeHID())
+    with pytest.raises(MP305Error):
+        psu.flash(None)                        # missing allow_untested_ota -> refuse
+    assert psu._dev.written == []              # nothing sent (refused before any I/O)
+
+
+def test_warn_untested_fires_once():
+    import warnings
+    P._warned_untested = False                 # reset the one-shot guard
+    assert P.HARDWARE_VALIDATED is False
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        P.warn_untested()
+        P.warn_untested()                      # second call must be silent
+    assert sum(issubclass(x.category, UserWarning) for x in w) == 1
+
+
 if __name__ == "__main__":
     import pytest as _pt
     raise SystemExit(_pt.main([__file__, "-q"]))
