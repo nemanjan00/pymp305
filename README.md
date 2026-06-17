@@ -68,9 +68,11 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 - 🎛️ **Full PSU control** — set V/I, toggle output, take/release remote control
 - 📈 **Live telemetry** — voltage, current, power, energy, temperature, runtime, errors
 - 🔋 **Charge mode** — battery charging by chemistry / cells / current
-- 🔌 **USB-PD + programmable** — read PD (PDO) profiles and stored output sequences, select/run them
+- 🔌 **USB-PD + programmable** — read/select/run PD (PDO) profiles and stored output sequences, and *define* them (writes)
+- 🔎 **USB-C e-marker** — read the attached cable's e-marker (speed/format)
 - 📡 **USB *and* Bluetooth** — `MP305` over USB-HID, `MP305BLE` (async, `bleak`) over BLE — same API
-- 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing
+- 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing (HID & BLE)
+- 🛟 **Safety-gated** — one-time untested-on-hardware warning; OTA behind an explicit `allow_untested_ota=True`
 - 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
 - 🧱 **Clean layers** — pure `protocol.py` framing shared by both transports
 - 🧪 **Golden-vector tested** (framing/units/firmware-decrypt) — **hardware validation pending**
@@ -192,11 +194,13 @@ copyrightable; the implementation here is independent.
 
 ## Roadmap
 
-- [ ] **Validate against real hardware** (unit incoming 🛒 — see the banner up top)
+- [ ] **Validate against real hardware** (unit incoming 🛒 — see the banner up top), then flip `HARDWARE_VALIDATED`
 - [x] BLE transport via `bleak` (`MP305BLE`, async — same command set, reuses `responses.py`)
-- [x] USB-PD (PDO) and programmable-sequence helpers
-- [x] OTA firmware flashing + firmware decryption (decrypt validated against official images;
-      flashing itself still unverified on hardware)
+- [x] USB-PD (PDO) + programmable-sequence helpers — read, select/run, **and write**
+- [x] USB-C e-marker reader
+- [x] OTA firmware flashing (HID **and** BLE) + firmware decryption (decrypt validated against
+      official images; flashing itself still unverified on hardware)
+- [x] Typed package (`py.typed`), one-time untested warning, OTA gated behind `allow_untested_ota`
 
 ## License
 

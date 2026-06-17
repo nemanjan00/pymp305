@@ -4,11 +4,15 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
-## 0.2.0 (unreleased)
+## 0.3.0
 
-Big feature release: a second transport plus the full advanced command surface.
+First release covering the whole MP305 line, a second transport, and the full advanced
+command surface. (0.2.0 was a local-only tag, never released — superseded by this.)
 
 ### Added
+- **Typed package**: ships `py.typed` so downstream type-checkers see the annotations.
+- **Safety gates**: `open()` emits a one-time `UserWarning` until `HARDWARE_VALIDATED`;
+  OTA `flash()` / `flash_ble()` require an explicit `allow_untested_ota=True`.
 - **BLE transport** `MP305BLE` (async, `bleak`): scan/connect, AF02 binding handshake,
   request/response over AF01, and the full high-level API mirroring the USB driver.
 - **Charge mode**: `read_charge_state()`, `read_charge_settings()`, `charge(ChargeCommand)`.

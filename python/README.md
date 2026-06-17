@@ -9,7 +9,8 @@ kept locally under `reversing/`, which is git-ignored and not published.)
 
 > **Status: not yet validated against real hardware.** Framing, decoding, units, and
 > firmware-decrypt are covered by golden-vector tests (`pytest`, all passing), but nothing
-> here has talked to a device. OTA *writing* is especially unverified. See *Bring-up* below.
+> here has talked to a device — `open()` emits a one-time `UserWarning` to that effect, and
+> OTA flashing is gated behind an explicit `allow_untested_ota=True`. See *Bring-up* below.
 
 ## Install
 
