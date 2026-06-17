@@ -22,7 +22,7 @@ On Linux you'll need permission to access the hidraw node. Either run as root fo
 test, or add a udev rule (recommended):
 
 ```
-# /etc/udev/rules.d/99-isdt-mp305.rules
+# /etc/udev/rules.d/99-pymp305.rules
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="28e9", MODE="0660", TAG+="uaccess"
 ```
 then `sudo udevadm control --reload && sudo udevadm trigger` and replug.
