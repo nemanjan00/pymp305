@@ -1,0 +1,14 @@
+{
+  "_comment": "ISDT OTA / release endpoints, recovered from the WebLink web app and the PolyLink Android app (see reversing/FINDINGS-endpoints.md). Hosts are tried in order (mirror fallback). Paths are relative to each host. fetch_firmware.py uses 'feeds' by default and 'feeds_staging' only with --staging.",
+  "hosts": ["https://www.isdt.co", "https://szisd.com"],
+  "feeds": {
+    "hid": "ota/newfirmware.json",
+    "ble": "ota/newble.json"
+  },
+  "feeds_staging": {
+    "hid": "ota/newfirmwareTest.json",
+    "ble": "ota/newbleTest.json"
+  },
+  "app_release": "down/apk/app/app.json",
+  "device_registry": "appdata/app-data.json"
+}
