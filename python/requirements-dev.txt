@@ -1,0 +1,6 @@
+# Dev/test/release tooling. Installs runtime deps too.
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+pytest
+build
+twine

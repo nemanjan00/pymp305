@@ -9,7 +9,22 @@ description = "Python driver for the ISDT MP305 (MP305A/MP305B) smart bench powe
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "nemanjan00", email = "nemanjan00@gmail.com" }]
+keywords = ["isdt", "mp305", "mp305a", "mp305b", "power-supply", "psu", "usb", "hid", "bench"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Hardware :: Hardware Drivers",
+]
 dependencies = ["hidapi>=0.14"]
+
+[project.urls]
+Homepage = "https://github.com/nemanjan00/pymp305"
+Repository = "https://github.com/nemanjan00/pymp305"
+Issues = "https://github.com/nemanjan00/pymp305/issues"
 
 [project.optional-dependencies]
 test = ["pytest"]
