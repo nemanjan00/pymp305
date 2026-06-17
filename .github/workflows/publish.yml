@@ -1,0 +1,64 @@
+name: publish
+
+# Publishes to PyPI via Trusted Publishing (OIDC) when a v* tag is pushed.
+# No tokens/secrets needed — register this repo as a trusted publisher first:
+#   PyPI -> project 'pymp305' -> Publishing -> Add a GitHub publisher:
+#     owner: nemanjan00   repo: pymp305   workflow: publish.yml   environment: pypi
+# (For the very first release, use PyPI's "pending publisher" so the project can be
+#  created on first upload.)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip pytest
+      - run: pytest -q python/tests
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python -m pip install --upgrade pip build
+      - name: Build sdist + wheel
+        working-directory: python
+        run: python -m build --outdir ../dist
+      - name: Validate metadata
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi          # optional; gives you a manual-approval gate if enabled
+    permissions:
+      id-token: write          # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
