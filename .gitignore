@@ -1,0 +1,14 @@
+# Reverse-engineering working material derived from ISDT's WebLink app.
+# This is ISDT's copyright — kept locally only, never published.
+reversing/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
