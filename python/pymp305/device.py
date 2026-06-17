@@ -310,6 +310,112 @@ class MP305:
     def enter_bootloader(self) -> None:
         self.send_raw_payload(P.BOOT_PAYLOAD)
 
+    # ---- OTA (experimental, see ota.py warnings) -------------------------
+    def _write_report(self, report_payload: bytes) -> None:
+        buf = bytes([P.REPORT_ID]) + bytes(report_payload)
+        if self._report_size and len(buf) < self._report_size + 1:
+            buf += b"\x00" * (self._report_size + 1 - len(buf))
+        self._dev.write(buf)
+
+    def _ota_wait(self, expect: int, timeout_ms: int = 8000) -> P.Frame:
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while time.monotonic() < deadline:
+            f = self.read_frame(timeout_ms=max(1, int((deadline - time.monotonic()) * 1000)))
+            if f and f.cmd == expect:
+                return f
+        raise MP305Error(f"OTA: timed out waiting for 0x{expect:02X}")
+
+    def flash(self, firmware, *, confirm: bool = False, progress=None,
+              boot_delay_s: float = 4.0) -> None:
+        """EXPERIMENTAL, UNTESTED firmware flash over USB-HID.
+
+        `firmware` is an ``ota.Firmware``. This enters the bootloader, erases, writes the
+        app (and data) region driven by device acks, verifies, and reboots. A failed app
+        write is normally recoverable by re-flashing (the bootloader is not touched), but
+        OTA is inherently risky — you must pass ``confirm=True``. `progress(done, total)`
+        is called as bytes are written.
+        """
+        from . import ota
+        if not confirm:
+            raise MP305Error("flash() is experimental — pass confirm=True to proceed")
+        idx = 4  # HID addressId
+
+        def report(done):
+            if progress:
+                progress(done, firmware.app_size + firmware.data_size)
+
+        # 1) enter bootloader, wait for 0xF1 ack
+        self.enter_bootloader()
+        f = self._ota_wait(0xF1)
+        if f.values[idx + 1] != 0:
+            raise MP305Error("OTA: bootloader did not accept (0xF1)")
+        time.sleep(boot_delay_s)
+
+        # 2) erase app
+        self.send_frame_raw(firmware.erase_app_frame())
+        f = self._ota_wait(0xF3)
+        if f.values[idx + 1] != 0:
+            raise MP305Error("OTA: erase failed (0xF3)")
+
+        # 3) write app, ack-driven fragmentation
+        write_bit = 0
+        chunks = ota.fragment_frame(firmware.write_app_frame(write_bit))
+        ci = 1
+        self._write_report(chunks[0])
+        while True:
+            f = self._ota_wait(0xF5)
+            sub = f.values[idx + 6]
+            if sub == 0x01:                        # device wants the next fragment
+                self._write_report(chunks[ci]); ci += 1
+            elif sub == 0x00:                      # block accepted
+                stat = ota.parse_stat_address(f.values, idx)
+                if stat != firmware.app_storage_offset + write_bit:
+                    continue
+                write_bit += 128
+                report(min(write_bit, firmware.app_size))
+                if write_bit >= firmware.app_size:
+                    break
+                chunks = ota.fragment_frame(firmware.write_app_frame(write_bit)); ci = 1
+                self._write_report(chunks[0])
+            else:
+                raise MP305Error(f"OTA: app write error (0xF5 sub=0x{sub:02X})")
+
+        # 4) app checksum
+        self.send_frame_raw(firmware.checksum_app_frame())
+        f = self._ota_wait(0xF7)
+        if f.values[idx + 1] != 0:
+            raise MP305Error("OTA: app checksum failed (0xF7)")
+
+        # 5) optional data region
+        if firmware.data_size:
+            write_bit = 0
+            chunks = ota.fragment_frame(firmware.write_data_frame(write_bit)); ci = 1
+            self._write_report(chunks[0])
+            while True:
+                f = self._ota_wait(0x20)
+                sub = f.values[idx + 1]
+                if sub == 0x04:                    # next fragment
+                    self._write_report(chunks[ci]); ci += 1
+                elif sub == 0x05:                  # block accepted
+                    write_bit += 128
+                    report(firmware.app_size + min(write_bit, firmware.data_size))
+                    if write_bit >= firmware.data_size:
+                        self.send_frame_raw(firmware.checksum_data_frame())
+                    else:
+                        chunks = ota.fragment_frame(firmware.write_data_frame(write_bit)); ci = 1
+                        self._write_report(chunks[0])
+                elif sub == 0x06:                  # verified -> reboot
+                    break
+                else:
+                    raise MP305Error(f"OTA: data write error (0x20 sub=0x{sub:02X})")
+
+        # 6) reboot into the new app
+        self.reboot()
+
+    def send_frame_raw(self, frame: bytes) -> None:
+        """Write a pre-built frame (from ota builders) as one HID report."""
+        self._write_report(frame)
+
 
 # Both models share this driver; aliases for discoverability / explicit intent.
 MP305A = MP305

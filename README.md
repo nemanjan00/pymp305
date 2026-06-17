@@ -11,8 +11,19 @@ Control voltage, current, and output over USB — no app, no cloud, just Python.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Transport: USB-HID](https://img.shields.io/badge/transport-USB--HID-success.svg)](./PROTOCOL.md)
+[![status: untested on hardware](https://img.shields.io/badge/hardware-UNTESTED-red.svg)](#-status-not-yet-tested-on-hardware)
 
 </div>
+
+> # 🚨 STATUS: NOT YET TESTED ON HARDWARE
+>
+> **Every line of this library was reverse-engineered from ISDT's WebLink web app — it has
+> not yet been run against a physical MP305A/MP305B.** The framing, decoding, units, and
+> command/firmware encoding are covered by golden-vector tests, but nothing here has talked
+> to a real device. Expect rough edges on first contact (HID report size, the BLE binding
+> handshake, exact charge/PD field meanings). **The OTA / firmware-flashing code is
+> especially unverified — treat it as dangerous.** Use at your own risk, and please open an
+> issue with results once you try it on actual hardware. See [Bring-up](./python/README.md).
 
 ```mermaid
 flowchart LR

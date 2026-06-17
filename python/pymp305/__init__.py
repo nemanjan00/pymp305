@@ -35,6 +35,8 @@ from .responses import (
 )
 from . import protocol
 from . import commands
+from . import ota
+from .ota import Firmware, IntelHexFirmware
 from .ble import MP305BLE   # safe to import even without bleak installed
 
 __all__ = [
@@ -45,6 +47,6 @@ __all__ = [
     "ProgramEntry", "ProgramSteps", "parse_pdo_item", "decode_errors",
     "BATTERY_TYPES", "ERROR_LIST",
     "MODEL_DC", "MODEL_PROGRAMMABLE", "MODEL_USB_PD", "MODEL_CHARGE",
-    "protocol", "commands",
+    "protocol", "commands", "ota", "Firmware", "IntelHexFirmware",
 ]
 __version__ = "0.1.0"
