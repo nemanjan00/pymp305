@@ -34,6 +34,10 @@ so the left column is controls (cards), the right column is read-outs (flat).
 - **USB-PD** — tap a PD profile (5 / 9 / 12 / 15 / 20 V) to request it; the USB-C **e-marker**
   (attached-cable info) shows read-only.
 
+| Charge mode | USB-PD mode |
+|:---:|:---:|
+| ![charge mode](./charge-mode.png) | ![usb-pd mode](./usbpd-mode.png) |
+
 Left — DC-mode controls:
 - **Output** — one big green/red card-button (huge hit target; state unmistakable). It *is*
   the on/off, so there's no separate "all off".
