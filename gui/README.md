@@ -37,17 +37,22 @@ Left — controls:
   (`9`→`V`, `1500`→`mA`); exact entry, no keyboard.
 - **Over-current** — a `CC | OCP` toggle (with descriptions, like the WebLink): the device's
   `currentOver` setting — `CC` = current-limit, `OCP` = trip the output.
-- **Presets** — one-click V+I rails; **right-click a preset to save** the current setpoint.
+- **Presets** — a header + flush button group of V+I rails; **right-click a preset to save**
+  the current setpoint.
 - **Sim load** (Ω) so you can watch CV→CC behaviour (and OCP trips) with no hardware.
 
 Right — read-outs (flat):
 - **Live charts** (60 s) of measured voltage and current.
 - **Power / Energy / Temperature gauge / Runtime** (Energy has a `↻` reset — the one button).
-- **Event log** — timestamped, colour-coded; **OVP/OCP trips appear here as alerts**, not as
-  LEDs (matching the WebLink, which has no protection lamps either).
+
+Full width, under both columns — a **collapsible Event log**: timestamped, colour-coded;
+**OVP/OCP trips appear here as alerts**, not as LEDs (matching the WebLink, which has no
+protection lamps either).
 
 Top bar: **battery** (internal cell — %, charging bolt, pulsing-red near-empty, click to
-toggle charge/discharge in sim), SIM/USB, model/fw, connection, Remote, Connect/Disconnect.
+toggle charge/discharge in sim), SIM/USB, model/fw, connection status, **Remote** (take/release
+remote control — releasing hands the knob back to the front panel and disables the on-screen
+controls, exactly like the device's `remoteCon` lockout), Connect/Disconnect.
 
 The on-screen keypad (tap any value to set it exactly — digits **and** unit buttons, no keyboard):
 

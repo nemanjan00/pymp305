@@ -4,6 +4,21 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.5
+
+### Fixed
+- **GUI — Remote button now actually works**: it was cosmetic (only restyled itself). It's
+  wired through `reqRemote` → `worker.set_remote` → backend: **take** remote control
+  (`set_output()`, `remote_con=1`) or **release** it (`release_remote()`); while released the
+  on-screen controls disable (the front panel has the knob), like the device's `remoteCon`.
+- Audited the whole backend↔library surface against the real `pymp305` API (`State` fields,
+  `ControlCommand`, `set_output`/`control`/`release_remote`) — all confirmed wired correctly.
+
+### Changed
+- **GUI**: over-current toggle is now card-shaped (no redundant wrapper card); **presets** are
+  a Bootstrap-style card (title + divider + flush edge-to-edge button group); the **event log**
+  moves to a **full-width, collapsible** panel under both columns.
+
 ## 0.4.4
 
 ### Changed

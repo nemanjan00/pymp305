@@ -70,13 +70,21 @@ class DeviceWorker(QObject):
 
     @pyqtSlot(int)
     def set_current_over(self, mode: int):
-        if self._live:
-            fn = getattr(self.backend, "set_current_over", None)
-            if fn is not None:
-                try:
-                    fn(mode)
-                except Exception as e:  # noqa: BLE001
-                    self.error.emit(str(e))
+        self._call("set_current_over", mode)
+
+    @pyqtSlot(bool)
+    def set_remote(self, held: bool):
+        self._call("set_remote", held)
+
+    def _call(self, method: str, *args):
+        if not self._live:
+            return
+        fn = getattr(self.backend, method, None)
+        if fn is not None:
+            try:
+                fn(*args)
+            except Exception as e:  # noqa: BLE001
+                self.error.emit(str(e))
 
     def _apply(self, **kw):
         if not self._live:

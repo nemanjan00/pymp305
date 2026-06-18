@@ -105,7 +105,7 @@ class SegToggle(QWidget):
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height(); r = 9; n = len(self._cells); cw = w / n
+        w, h = self.width(), self.height(); r = 13; n = len(self._cells); cw = w / n   # card-shaped
         outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
         fcode = QFont(); fcode.setPointSize(13); fcode.setBold(True)
         fsub = QFont(); fsub.setPointSize(8); fsub.setBold(True)
@@ -345,6 +345,19 @@ class Chip(QPushButton):
         self.setStyleSheet("padding: 0 2px;")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def set_group_style(self, i, n):
+        """Style as a member of a flush button group (no gaps; only the group's outer
+        bottom corners are rounded, to sit edge-to-edge in a card)."""
+        self.setFixedHeight(42)
+        rad = ("border-bottom-left-radius:13px;" if i == 0 else "") + \
+              ("border-bottom-right-radius:13px;" if i == n - 1 else "")
+        right = f"border-right:1px solid {C['stroke']};" if i < n - 1 else ""
+        self.setStyleSheet(
+            f"QPushButton {{ background:{C['card_hi']}; border:none; {right}{rad}"
+            f" padding:0; font-weight:700; color:{C['text']}; }}"
+            f"QPushButton:hover {{ background:{C['hover']}; color:{C['accent']}; }}"
+            f"QPushButton:disabled {{ color:{C['off']}; }}")
+
 
 class PresetChip(Chip):
     """One-click V+I recall; right-click stores the current setpoint into the slot."""
@@ -385,7 +398,7 @@ def _readout(title, unit, color):
 class MainWindow(QWidget):
     reqConnect = pyqtSignal(); reqDisconnect = pyqtSignal()
     reqV = pyqtSignal(float); reqA = pyqtSignal(float); reqOut = pyqtSignal(bool)
-    reqCurrentOver = pyqtSignal(int)
+    reqCurrentOver = pyqtSignal(int); reqRemote = pyqtSignal(bool)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -393,6 +406,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("MP305 — ISDT bench supply")
         self.resize(1180, 860)
         self._sync = False; self._init_sp = False; self._last_errors = set()
+        self._connected = False; self._remote_held = True
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
         self.backend, self.is_real = make_backend(prefer_real)
@@ -408,9 +422,12 @@ class MainWindow(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
         root.addWidget(self._topbar())
-        body = QWidget(); bl = QHBoxLayout(body); bl.setContentsMargins(14, 12, 14, 14); bl.setSpacing(14)
-        bl.addWidget(self._left_column(), 0)
-        bl.addLayout(self._right_column(), 1)
+        body = QWidget(); bl = QVBoxLayout(body); bl.setContentsMargins(14, 12, 14, 14); bl.setSpacing(12)
+        cols = QHBoxLayout(); cols.setSpacing(14)
+        cols.addWidget(self._left_column(), 0)
+        cols.addLayout(self._right_column(), 1)
+        bl.addLayout(cols, 1)
+        bl.addWidget(self._log_card())          # event log spans the full width, under both columns
         root.addWidget(body, 1)
 
     def _topbar(self):
@@ -422,7 +439,7 @@ class MainWindow(QWidget):
         self._set_status("○ Disconnected", C["muted"], tint=False)
         self.btn_remote = QPushButton("Remote"); self.btn_remote.setCheckable(True); self.btn_remote.setChecked(True)
         self.btn_remote.setToolTip("Take / release remote control (front panel lockout)")
-        self.btn_remote.toggled.connect(self._style_remote); self._style_remote(True)
+        self.btn_remote.toggled.connect(self._on_remote_toggle); self._style_remote(True)
         self.btn_conn = QPushButton("Connect"); self.btn_conn.setObjectName("primary")
         self.btn_conn.clicked.connect(self._toggle_conn)
         self.batt = BatteryWidget(); self.batt.setToolTip("Internal cell")
@@ -445,8 +462,8 @@ class MainWindow(QWidget):
 
         # over-current behaviour is a SETTING → it lives with the controls (matches WebLink's
         # currentOver toggle in the control area): CC = current-limit, OCP = trip the output.
-        oc = QFrame(); oc.setProperty("class", "card"); oc.setFixedHeight(98)
-        ov = QVBoxLayout(oc); ov.setContentsMargins(16, 8, 16, 10); ov.setSpacing(6)
+        oc = QFrame(); oc.setFixedHeight(86)        # no card: the toggle has its own border
+        ov = QVBoxLayout(oc); ov.setContentsMargins(2, 4, 2, 6); ov.setSpacing(6)
         ov.addWidget(_lab("OVER-CURRENT", "cardTitle"))
         self.cov = SegToggle([("CC", "Constant Current", C["warn"]),
                               ("OCP", "Overcurrent Protection", C["danger"])])
@@ -460,15 +477,22 @@ class MainWindow(QWidget):
             self.ch_load.changed.connect(self.backend.set_load)
             v.addWidget(self.ch_load)
 
-        pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(92)
-        pv = QVBoxLayout(pc); pv.setContentsMargins(16, 10, 16, 12); pv.setSpacing(8)
-        pv.addWidget(_lab("PRESETS  (right-click saves)", "cardTitle"))
-        prow = QHBoxLayout(); prow.setSpacing(6)
-        for volts, amps in ((3.3, 3), (5, 3), (9, 3), (12, 5), (20, 5)):
+        # Bootstrap-style card: a title header, a divider, then a flush edge-to-edge button
+        # group (only the group's outer bottom corners are rounded).
+        pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(80)
+        pv = QVBoxLayout(pc); pv.setContentsMargins(0, 0, 0, 0); pv.setSpacing(0)
+        title = _lab("PRESETS  ·  right-click saves", "cardTitle"); title.setContentsMargins(16, 11, 16, 9)
+        pv.addWidget(title)
+        sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet(f"background:{C['stroke']};border:none;")
+        pv.addWidget(sep)
+        grp = QWidget(); gl = QHBoxLayout(grp); gl.setContentsMargins(0, 0, 0, 0); gl.setSpacing(0)
+        presets = ((3.3, 3), (5, 3), (9, 3), (12, 5), (20, 5)); n = len(presets)
+        for i, (volts, amps) in enumerate(presets):
             b = PresetChip(volts, amps)
             b.applied.connect(self._apply_preset); b.saveReq.connect(self._save_preset)
-            prow.addWidget(b)
-        pv.addLayout(prow); v.addWidget(pc)
+            b.set_group_style(i, n)
+            gl.addWidget(b, 1)
+        pv.addWidget(grp); v.addWidget(pc)
 
         v.addStretch(1)
         self._set_enabled(False)
@@ -485,14 +509,28 @@ class MainWindow(QWidget):
         stats.addWidget(self.r_pow[0], 1); stats.addWidget(self.r_energy[0], 1)
         stats.addWidget(self.temp_gauge, 1); stats.addWidget(self.r_time[0], 1)
         col.addLayout(stats)
-        # event log lives on the right now (the over-current setting took its place on the left)
-        lc = QFrame(); lc.setFixedHeight(132)        # flat; the QPlainTextEdit has its own border
-        lv = QVBoxLayout(lc); lv.setContentsMargins(0, 10, 0, 0); lv.setSpacing(6)
-        lv.addWidget(_lab("EVENT LOG", "cardTitle"))
+        return col
+
+    def _log_card(self):
+        self._log_box = QFrame()
+        lv = QVBoxLayout(self._log_box); lv.setContentsMargins(0, 6, 0, 0); lv.setSpacing(6)
+        self._log_hdr = QPushButton("▾  EVENT LOG"); self._log_hdr.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._log_hdr.setStyleSheet(
+            f"QPushButton {{ text-align:left; background:transparent; border:none; padding:2px 0;"
+            f" color:{C['muted']}; font-size:12px; font-weight:700; letter-spacing:1px; }}"
+            f"QPushButton:hover {{ color:{C['text']}; }}")
+        self._log_hdr.clicked.connect(self._toggle_log)
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setFont(mono(9, bold=False))
         self.log.setStyleSheet(f"background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;")
-        lv.addWidget(self.log); col.addWidget(lc)
-        return col
+        lv.addWidget(self._log_hdr); lv.addWidget(self.log)
+        self._log_box.setFixedHeight(120)
+        return self._log_box
+
+    def _toggle_log(self):
+        vis = not self.log.isVisible()
+        self.log.setVisible(vis)
+        self._log_hdr.setText(("▾" if vis else "▸") + "  EVENT LOG")
+        self._log_box.setFixedHeight(120 if vis else 30)
 
     def _energy_card(self):
         ec = QFrame(); ec.setFixedHeight(72)        # flat readout; only the ↻ reset is a button
@@ -542,6 +580,7 @@ class MainWindow(QWidget):
         self.reqConnect.connect(self.worker.connect_device); self.reqDisconnect.connect(self.worker.disconnect_device)
         self.reqV.connect(self.worker.set_voltage); self.reqA.connect(self.worker.set_current)
         self.reqOut.connect(self.worker.set_output); self.reqCurrentOver.connect(self.worker.set_current_over)
+        self.reqRemote.connect(self.worker.set_remote)
         self.thread.start()
 
     # ---- helpers
@@ -549,8 +588,25 @@ class MainWindow(QWidget):
         (self.reqConnect if self.btn_conn.text() == "Connect" else self.reqDisconnect).emit()
 
     def _set_enabled(self, on):
+        self._connected = on
+        self._refresh_controls()
+
+    def _refresh_controls(self):
+        # controls are live only while connected AND holding remote control (else the front
+        # panel has the knob — exactly like the device's remoteCon lockout)
+        live = self._connected and self._remote_held
         for w in (self.out_btn, self.ch_v, self.ch_a, self.cov):
-            w.setEnabled(on)
+            w.setEnabled(live)
+        self.btn_remote.setEnabled(self._connected)
+
+    def _on_remote_toggle(self, held):
+        self._style_remote(held)
+        self._remote_held = held
+        self._refresh_controls()
+        if not self._sync:
+            self.reqRemote.emit(held)
+            self._logline("remote control " + ("taken" if held else "released → front panel"),
+                          C["accent"] if held else C["muted"])
 
     def _apply_preset(self, v, a):
         self.ch_v.set_setpoint(v, emit=True); self.ch_a.set_setpoint(a, emit=True)

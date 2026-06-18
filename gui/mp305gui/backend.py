@@ -60,6 +60,13 @@ class RealBackend:
             real_change=3, voltage_slow=st.voltage_slow, current_over=int(mode),
             output=st.output, model=st.model))
 
+    def set_remote(self, held):
+        # take remote control (remote_con=1, preserving V/I/output) or hand it back to the panel
+        if held:
+            self._psu.set_output()        # set_output() with no args just takes remote + preserves
+        else:
+            self._psu.release_remote()    # remote_con=0 → front panel regains control
+
     def reset_energy(self):
         pass   # no device command mapped for the energy/time reset yet
 
@@ -86,6 +93,7 @@ class SimBackend:
         self.batt = 86.0
         self.charging = True
         self.current_over = 0      # 0 = CC (current-limit), 1 = OCP (trip)
+        self.remote = True         # whether the app holds remote control (vs front panel)
         self._ocp_trip = False
         self._t0 = time.monotonic()
         self._last = self._t0
@@ -97,6 +105,9 @@ class SimBackend:
 
     def set_current_over(self, mode):
         self.current_over = int(mode)
+
+    def set_remote(self, held):
+        self.remote = bool(held)
 
     def reset_energy(self):
         self.energy_wh = 0.0
