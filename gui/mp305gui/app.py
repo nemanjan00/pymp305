@@ -21,12 +21,12 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
-    QGridLayout, QDialog, QPlainTextEdit, QSizePolicy,
+    QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup, QComboBox,
 )
 
 from .theme import C, STYLESHEET
 from .worker import DeviceWorker
-from .backend import make_backend, SimBackend
+from .backend import make_backend, SimBackend, CHEMS, MODE_DC, MODE_PD, MODE_CHARGE
 
 WINDOW = 60.0
 MONO = ["JetBrains Mono", "IBM Plex Mono", "DejaVu Sans Mono", "Consolas", "monospace"]
@@ -78,8 +78,9 @@ class EasedValue(QObject):
 # ---------------------------------------------------------------- widgets
 class OutputButton(QPushButton):
     """The whole OUTPUT card is one button — green ON, red OFF. Huge trackball target."""
-    def __init__(self):
+    def __init__(self, on_text="⏻   OUTPUT ON", off_text="⏻   OUTPUT OFF"):
         super().__init__()
+        self._on_text, self._off_text = on_text, off_text
         self.setCheckable(True); self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(92)
         self._mix = 0.0                       # 0 = OFF (red), 1 = ON (green)
@@ -89,7 +90,7 @@ class OutputButton(QPushButton):
         self.toggled.connect(self._on_toggled); self._restyle(0.0)
 
     def _on_toggled(self, on):
-        self.setText("⏻   OUTPUT ON" if on else "⏻   OUTPUT OFF")
+        self.setText(self._on_text if on else self._off_text)
         self._anim.stop(); self._anim.setStartValue(self._mix)
         self._anim.setEndValue(1.0 if on else 0.0); self._anim.start()
 
@@ -524,6 +525,8 @@ class MainWindow(QWidget):
     reqConnect = pyqtSignal(); reqDisconnect = pyqtSignal()
     reqV = pyqtSignal(float); reqA = pyqtSignal(float); reqOut = pyqtSignal(bool)
     reqCurrentOver = pyqtSignal(int); reqRemote = pyqtSignal(bool)
+    reqMode = pyqtSignal(int); reqCharge = pyqtSignal(dict); reqCharging = pyqtSignal(bool)
+    reqSelectPDO = pyqtSignal(int)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -576,7 +579,29 @@ class MainWindow(QWidget):
 
     def _left_column(self):
         col = QFrame(); col.setFixedWidth(360)
-        v = QVBoxLayout(col); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(12)
+        v = QVBoxLayout(col); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
+        # mode tabs — the device runs ONE mode at a time (its `model` field), so switching a
+        # tab switches the device mode and the control panel below.
+        tabs = QHBoxLayout(); tabs.setSpacing(6)
+        self._mode_grp = QButtonGroup(self); self._mode_grp.setExclusive(True)
+        self._mode_tabs = {}
+        for label, model, page in (("DC PSU", MODE_DC, 0), ("Charge", MODE_CHARGE, 1), ("USB-PD", MODE_PD, 2)):
+            b = QPushButton(label); b.setProperty("class", "tab"); b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _, m=model, p=page: self._switch_mode(m, p))
+            self._mode_grp.addButton(b); tabs.addWidget(b); self._mode_tabs[model] = (b, page)
+        self._mode_tabs[MODE_DC][0].setChecked(True)
+        v.addLayout(tabs)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self._dc_page())          # 0
+        self.stack.addWidget(self._charge_page())      # 1
+        self.stack.addWidget(self._pd_page())          # 2
+        v.addWidget(self.stack, 1)
+        self._set_enabled(False)
+        return col
+
+    def _dc_page(self):
+        page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(12)
         self.out_btn = OutputButton()
         self.out_btn.toggled.connect(lambda on: None if self._sync else self.reqOut.emit(on))
         v.addWidget(self.out_btn)
@@ -587,8 +612,6 @@ class MainWindow(QWidget):
         self.ch_a.changed.connect(lambda x: None if self._sync else self.reqA.emit(x))
         v.addWidget(self.ch_v); v.addWidget(self.ch_a)
 
-        # over-current behaviour is a SETTING → it lives with the controls (matches WebLink's
-        # currentOver toggle in the control area): CC = current-limit, OCP = trip the output.
         oc = QFrame()        # no card: the toggle has its own border
         ov = QVBoxLayout(oc); ov.setContentsMargins(2, 4, 2, 0); ov.setSpacing(6)
         ov.addWidget(_lab("OVER-CURRENT", "cardTitle"))
@@ -596,7 +619,7 @@ class MainWindow(QWidget):
                               ("OCP", "Overcurrent Protection", C["danger"])])
         self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
         ov.addWidget(self.cov, 1)
-        v.addWidget(oc, 1)        # the toggle grows to fill, so the left column matches the right
+        v.addWidget(oc, 1)
 
         if isinstance(self.backend, SimBackend):
             self.ch_load = ChannelCard("SIM LOAD", "Ω", 100.0, C["pink"], 0, measured=False)
@@ -604,8 +627,6 @@ class MainWindow(QWidget):
             self.ch_load.changed.connect(self.backend.set_load)
             v.addWidget(self.ch_load)
 
-        # Bootstrap-style card: a title header, a divider, then a flush edge-to-edge button
-        # group (only the group's outer bottom corners are rounded).
         pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(80)
         pv = QVBoxLayout(pc); pv.setContentsMargins(0, 0, 0, 0); pv.setSpacing(0)
         title = _lab("PRESETS  ·  right-click saves", "cardTitle"); title.setContentsMargins(16, 11, 16, 9)
@@ -620,9 +641,76 @@ class MainWindow(QWidget):
             b.set_group_style(i, n)
             gl.addWidget(b, 1)
         pv.addWidget(grp); v.addWidget(pc)
+        return page
 
-        self._set_enabled(False)        # the over-current card (above) absorbs the slack now
-        return col
+    def _combo_card(self, title, items, on_change):
+        card = QFrame(); card.setProperty("class", "card"); card.setFixedHeight(64)
+        cl = QVBoxLayout(card); cl.setContentsMargins(16, 8, 16, 8); cl.setSpacing(4)
+        cl.addWidget(_lab(title, "cardTitle"))
+        combo = QComboBox(); combo.addItems([str(x) for x in items])
+        combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        combo.setStyleSheet(
+            f"QComboBox{{background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;"
+            f"padding:3px 10px;color:{C['text']};font-weight:700;}}"
+            f"QComboBox::drop-down{{border:none;width:22px;}}"
+            f"QComboBox QAbstractItemView{{background:{C['card']};color:{C['text']};"
+            f"selection-background-color:{C['accent']};selection-color:{C['panel']};outline:none;}}")
+        combo.currentIndexChanged.connect(lambda i: None if self._sync else on_change(i))
+        cl.addWidget(combo)
+        return card, combo
+
+    def _charge_page(self):
+        page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(12)
+        self.chg_btn = OutputButton("⚡   CHARGING", "⚡   START CHARGE")
+        self.chg_btn.toggled.connect(lambda on: None if self._sync else self.reqCharging.emit(on))
+        v.addWidget(self.chg_btn)
+        chem_card, self.cmb_chem = self._combo_card("CHEMISTRY", CHEMS,
+                                                    lambda i: self.reqCharge.emit({"chem": i}))
+        v.addWidget(chem_card)
+        cells_card, self.cmb_cells = self._combo_card("CELLS (S)", list(range(1, 13)),
+                                                      lambda i: self.reqCharge.emit({"cells": i + 1}))
+        v.addWidget(cells_card)
+        self.ch_chgA = ChannelCard("CHARGE CURRENT", "A", 10.0, C["pow"], 2, measured=False)
+        self.ch_chgA.set_setpoint(1.0)
+        self.ch_chgA.changed.connect(lambda x: None if self._sync else self.reqCharge.emit({"current": x}))
+        v.addWidget(self.ch_chgA)
+        sc = QFrame(); sc.setProperty("class", "card"); sc.setFixedHeight(64)
+        scl = QVBoxLayout(sc); scl.setContentsMargins(16, 8, 16, 8); scl.setSpacing(4)
+        scl.addWidget(_lab("CHARGE", "cardTitle"))
+        self.chg_stat = QLabel("idle"); self.chg_stat.setFont(mono(15)); self.chg_stat.setStyleSheet(f"color:{C['pow']};")
+        scl.addWidget(self.chg_stat); v.addWidget(sc)
+        v.addStretch(1)
+        return page
+
+    def _pd_page(self):
+        page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
+        v.addWidget(_lab("USB-PD PROFILES  ·  tap to request", "cardTitle"))
+        self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
+        self._pdo_btns = []
+        v.addStretch(1)
+        em = QFrame(); em.setProperty("class", "card"); em.setFixedHeight(60)
+        eml = QVBoxLayout(em); eml.setContentsMargins(16, 8, 16, 8); eml.setSpacing(4)
+        eml.addWidget(_lab("USB-C CABLE", "cardTitle"))
+        self._emark_lab = QLabel("—"); self._emark_lab.setFont(mono(10, bold=False))
+        self._emark_lab.setStyleSheet(f"color:{C['curr']};"); self._emark_lab.setWordWrap(True)
+        eml.addWidget(self._emark_lab); v.addWidget(em)
+        return page
+
+    def _rebuild_pdos(self, pdos):
+        for b in self._pdo_btns:
+            b.setParent(None)
+        self._pdo_btns = []
+        for i, (pv, pa) in enumerate(pdos):
+            b = QPushButton(f"{pv:g} V   ·   {pa:g} A"); b.setFixedHeight(40)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _, idx=i: None if self._sync else self.reqSelectPDO.emit(idx))
+            self._pdo_wrap.addWidget(b); self._pdo_btns.append(b)
+
+    def _switch_mode(self, model, page):
+        self.stack.setCurrentIndex(page)
+        if not self._sync:
+            self.reqMode.emit(model)
+            self._logline(f"mode → {['DC PSU', '', 'USB-PD', 'Charge'][model]}", C["accent"])
 
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
@@ -707,6 +795,8 @@ class MainWindow(QWidget):
         self.reqV.connect(self.worker.set_voltage); self.reqA.connect(self.worker.set_current)
         self.reqOut.connect(self.worker.set_output); self.reqCurrentOver.connect(self.worker.set_current_over)
         self.reqRemote.connect(self.worker.set_remote)
+        self.reqMode.connect(self.worker.set_mode); self.reqCharge.connect(self.worker.set_charge)
+        self.reqCharging.connect(self.worker.set_charging); self.reqSelectPDO.connect(self.worker.select_pdo)
         self.thread.start()
 
     # ---- helpers
@@ -721,8 +811,9 @@ class MainWindow(QWidget):
         # controls are live only while connected AND holding remote control (else the front
         # panel has the knob — exactly like the device's remoteCon lockout)
         live = self._connected and self._remote_held
-        for w in (self.out_btn, self.ch_v, self.ch_a, self.cov):
-            w.setEnabled(live)
+        self.stack.setEnabled(live)                       # all per-mode control panels
+        for b, _ in self._mode_tabs.values():
+            b.setEnabled(self._connected)                 # can switch mode whenever connected
         self.btn_remote.setEnabled(self._connected)
 
     def _on_remote_toggle(self, held):
@@ -817,11 +908,50 @@ class MainWindow(QWidget):
                 self.cov.pulse()              # brief red flash on the over-current toggle
         self._last_errors = errs
 
+        self._sync_modes(st)
+
         t = time.monotonic() - self._t0
         self._t.append(t); self._v.append(st["voltage"]); self._i.append(st["current"])
         while self._t and self._t[0] < t - WINDOW:
             self._t.popleft(); self._v.popleft(); self._i.popleft()
         self.curve_v.setData(self._t, self._v); self.curve_i.setData(self._t, self._i)
+
+    def _sync_modes(self, st):
+        """Reflect the device's current mode + the Charge/USB-PD panels (read-back, no emit)."""
+        self._sync = True
+        model = st.get("model", MODE_DC)
+        if model in self._mode_tabs:
+            btn, page = self._mode_tabs[model]
+            if not btn.isChecked():
+                btn.setChecked(True)
+            if self.stack.currentIndex() != page:
+                self.stack.setCurrentIndex(page)
+        # Charge panel
+        self.cmb_chem.setCurrentIndex(min(self.cmb_chem.count() - 1, st.get("chem", 0)))
+        self.cmb_cells.setCurrentIndex(max(0, min(self.cmb_cells.count() - 1, st.get("cells", 1) - 1)))
+        self.ch_chgA.set_setpoint(st.get("charge_current", 0.0))
+        charging = bool(st.get("charging_ext", False))
+        if self.chg_btn.isChecked() != charging:
+            self.chg_btn.setChecked(charging)
+        pct = st.get("charge_pct", 0)
+        if model == MODE_CHARGE and charging:
+            self.chg_stat.setText(f"{pct}%   ·   {st['voltage']:.1f} V   ·   {st['current']:.2f} A")
+        else:
+            self.chg_stat.setText(f"{pct}%   ·   idle" if model == MODE_CHARGE else "idle")
+        # USB-PD panel
+        pdos = st.get("pdos", [])
+        if pdos and len(self._pdo_btns) != len(pdos):
+            self._rebuild_pdos(pdos)
+        sel = st.get("pdo_sel", -1)
+        for i, b in enumerate(self._pdo_btns):
+            if i == sel:
+                b.setStyleSheet(f"QPushButton{{background:{C['accent']};color:{C['panel']};"
+                                f"border:none;border-radius:9px;font-weight:800;}}")
+            else:
+                b.setStyleSheet(f"QPushButton{{background:{C['card_hi']};border:1px solid {C['stroke']};"
+                                f"border-radius:9px;font-weight:700;}}QPushButton:hover{{background:{C['hover']};}}")
+        self._emark_lab.setText(str(st.get("emarker", "—")))
+        self._sync = False
 
     def closeEvent(self, e):
         try:

@@ -4,6 +4,20 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.5.0
+
+### Added
+- **GUI mode tabs — Charge & USB-PD**: the dashboard now covers all of the device's operating
+  modes (it runs one at a time, so they're tabs, not windows):
+  - **Charge** — chemistry, cell count, charge current, start/stop, live charge status
+    (wraps `charge()`/`ChargeCommand`).
+  - **USB-PD** — list/select PD profiles (wraps `read_pdo()`/`pdo_connect()`), plus the USB-C
+    **e-marker** cable read-out (`read_emarker()`).
+  - The simulator models all three modes (charge fills a virtual pack CC→CV; PD pins the output
+    to the selected profile). Real-hardware charge/PD paths are wired but **untested**.
+
+(Library unchanged — the GUI uses lib methods that already shipped in 0.3.0.)
+
 ## 0.4.8
 
 ### Added

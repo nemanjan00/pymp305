@@ -150,9 +150,10 @@ see the banner.**
 
 A Dracula-themed PyQt6 dashboard in [`gui/`](./gui), designed for a **trackball-only**
 lab PC (no keyboard, no accidental changes): per-channel instrument cards (measured + tap-to-set
-keypad), a centered **CV|CC** indicator, a big output card-button, battery + temperature, and
-rolling V/I charts. Runs against a real MP305 or a built-in simulator (the shot is the
-simulator driving a CV→CC transition).
+keypad), a big output card-button, an over-current `CC|OCP` toggle, battery + temperature, and
+rolling V/I charts. **Mode tabs** mirror the device — **DC PSU**, **Charge** (chemistry / cells /
+current), and **USB-PD** (tap a profile; read the cable's e-marker). Eased read-outs and animated
+toggles. Runs against a real MP305 or a built-in simulator.
 
 ![GUI screenshot](./gui/dashboard.png)
 

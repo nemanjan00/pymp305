@@ -76,6 +76,28 @@ class DeviceWorker(QObject):
     def set_remote(self, held: bool):
         self._call("set_remote", held)
 
+    @pyqtSlot(int)
+    def set_mode(self, model: int):
+        self._call("set_mode", model)
+
+    @pyqtSlot(dict)
+    def set_charge(self, params: dict):
+        if self._live:
+            fn = getattr(self.backend, "set_charge", None)
+            if fn is not None:
+                try:
+                    fn(**params)
+                except Exception as e:  # noqa: BLE001
+                    self.error.emit(str(e))
+
+    @pyqtSlot(bool)
+    def set_charging(self, on: bool):
+        self._call("set_charging", on)
+
+    @pyqtSlot(int)
+    def select_pdo(self, i: int):
+        self._call("select_pdo", i)
+
     def _call(self, method: str, *args):
         if not self._live:
             return
