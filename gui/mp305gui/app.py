@@ -460,13 +460,11 @@ class MainWindow(QWidget):
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
         col.addWidget(self._charts(), 1)
-        lampcard = QFrame(); lampcard.setProperty("class", "card"); lampcard.setFixedHeight(60)
-        lh = QHBoxLayout(lampcard); lh.setContentsMargins(18, 0, 18, 0); lh.setSpacing(18)
-        self.seg = SegIndicator([("CC", C["warn"]), ("OCP", C["danger"])])
+        strip = QHBoxLayout(); strip.setContentsMargins(2, 0, 2, 0); strip.setSpacing(16)
+        self.seg = SegIndicator([("CC", C["warn"]), ("OCP", C["danger"])])   # standalone, no card
         self.lamp_ovp = Lamp("OVP")
-        lh.addStretch(1); lh.addWidget(self.seg); lh.addStretch(1)   # CC|OCP centered
-        lh.addWidget(self.lamp_ovp)
-        col.addWidget(lampcard)
+        strip.addWidget(self.seg); strip.addWidget(self.lamp_ovp); strip.addStretch(1)
+        col.addLayout(strip)
         stats = QHBoxLayout(); stats.setSpacing(14)
         self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = self._energy_card()
         self.temp_gauge = TempGauge(); self.r_time = _readout("RUNTIME", "", C["text"])
@@ -542,10 +540,10 @@ class MainWindow(QWidget):
         self._logline(f"saved preset {chip.v:g}V / {chip.a:g}A", C["accent"])
 
     def _set_badge(self, text, hexcol):
-        # small SQUARE tag — reads as a badge, not a button
-        rgb = _rgb(hexcol); self.badge.setText(text)
-        self.badge.setStyleSheet(f"background:rgba({rgb},0.18);color:{hexcol};border:1px solid rgba({rgb},0.55);"
-                                 f"border-radius:5px;padding:2px 7px;font-size:11px;font-weight:800;letter-spacing:1px;")
+        # flat colored label (no box) — matches the flat status text; only real buttons are boxed
+        self.badge.setText(text)
+        self.badge.setStyleSheet(f"background:transparent;border:none;color:{hexcol};"
+                                 f"font-size:11px;font-weight:800;letter-spacing:2px;padding:0 2px;")
 
     def _set_status(self, text, hexcol, tint=True):
         # flat dot + text (no box) — clearly a status indicator, not a clickable button
