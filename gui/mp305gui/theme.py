@@ -34,7 +34,7 @@ QFrame.card {{
     background: {C['card']}; border: 1px solid {C['stroke']}; border-radius: 14px;
 }}
 QFrame.topbar {{ background: {C['panel']}; border-bottom: 1px solid {C['stroke']}; }}
-QLabel.h1 {{ font-size: 20px; font-weight: 800; letter-spacing: 2px; color: {C['accent']}; }}
+QLabel.h1 {{ font-size: 28px; font-weight: 800; letter-spacing: 2px; color: {C['accent']}; }}
 QLabel.sub {{ color: {C['muted']}; font-size: 12px; }}
 QLabel.cardTitle {{ color: {C['muted']}; font-size: 12px; font-weight: 700; letter-spacing: 1px; }}
 QLabel.bigValue {{ font-size: 46px; font-weight: 800; }}

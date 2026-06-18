@@ -4,6 +4,17 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.4
+
+### Changed
+- **GUI layout/semantics polish**: the over-current `CC | OCP` toggle (a *setting*) moves to
+  the left control column with CC/OCP descriptions (like the WebLink), pushing the event log
+  to the right; removed the redundant "all off" (the OUTPUT button is the on/off); dropped the
+  status-lamp strip — CV/CC are card tags and OVP/OCP surface as **log alerts** (the WebLink
+  has no protection LEDs). Consistent design language: cards = interactive, flat = read-only
+  (the whole right column is flat bar the energy reset button), a divider between charts and
+  stats, bigger logo, keypad screenshot in the GUI README.
+
 ## 0.4.3
 
 ### Changed

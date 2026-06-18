@@ -25,21 +25,33 @@ python run.py --demo     # force the simulator
 
 ## On screen
 
-- **Output** — one big green/red card-button (huge hit target; state unmistakable).
-- **Voltage / Current channel cards** — measured value (big) + a tappable **SET** sub-row in
-  one card; the **limiting channel highlights** (border + tag) so **CV vs CC is obvious**.
-- **Keypad** — tap any channel to open an on-screen pad with **digit + unit** buttons
+Design language: **a card means it's interactive** (click/tap), flat means read-only —
+so the left column is controls (cards), the right column is read-outs (flat).
+
+Left — controls:
+- **Output** — one big green/red card-button (huge hit target; state unmistakable). It *is*
+  the on/off, so there's no separate "all off".
+- **Voltage / Current channel cards** — measured value (big) + a tappable **SET** sub-row;
+  the active channel highlights with a `CV`/`CC` tag (the device's regulation status).
+- **Keypad** — tap a channel for an on-screen pad with **digit + unit** buttons
   (`9`→`V`, `1500`→`mA`); exact entry, no keyboard.
+- **Over-current** — a `CC | OCP` toggle (with descriptions, like the WebLink): the device's
+  `currentOver` setting — `CC` = current-limit, `OCP` = trip the output.
 - **Presets** — one-click V+I rails; **right-click a preset to save** the current setpoint.
-- **Over-current toggle** `CC | OCP` — a real *control* (sets the device's `currentOver`:
-  CC = current-limit, OCP = trip the output). Distinct from the **CV / CC / OVP status lamps**
-  (CV/CC come from the device's regulation status); the OCP cell doubles as its trip lamp.
-- **Battery** (internal cell) — %, charging bolt, colour by level, **pulsing red near-empty**;
-  click to toggle charge/discharge (sim).
-- **Temperature** bar gauge, **Power**, **Energy**, **Runtime**.
+- **Sim load** (Ω) so you can watch CV→CC behaviour (and OCP trips) with no hardware.
+
+Right — read-outs (flat):
 - **Live charts** (60 s) of measured voltage and current.
-- **Event log** (timestamped, colour-coded).
-- **Sim load** (Ω) so you can watch CV→CC behaviour with no hardware.
+- **Power / Energy / Temperature gauge / Runtime** (Energy has a `↻` reset — the one button).
+- **Event log** — timestamped, colour-coded; **OVP/OCP trips appear here as alerts**, not as
+  LEDs (matching the WebLink, which has no protection lamps either).
+
+Top bar: **battery** (internal cell — %, charging bolt, pulsing-red near-empty, click to
+toggle charge/discharge in sim), SIM/USB, model/fw, connection, Remote, Connect/Disconnect.
+
+The on-screen keypad (tap any value to set it exactly — digits **and** unit buttons, no keyboard):
+
+<img src="./keypad.png" alt="keypad" width="220">
 
 ## Architecture
 

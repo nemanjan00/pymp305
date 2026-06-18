@@ -83,13 +83,15 @@ class Lamp(QWidget):
 
 class SegToggle(QWidget):
     """A real mutually-exclusive segmented toggle (Bootstrap-style joined cells). Click a
-    cell to select it. Used for the over-current behavior: CC (current-limit) | OCP (trip).
-    Faithful to WebLink's `connectSets.currentOver` (0=CC, 1=OCP)."""
+    cell to select it; each shows a code + a smaller description (like WebLink's cells).
+    Used for over-current behaviour: CC (current-limit) | OCP (trip) = `currentOver` 0/1."""
     selected = pyqtSignal(int)
 
-    def __init__(self, cells):                       # cells = [(label, color), ...]
+    def __init__(self, cells):                       # cells = [(code, description, color), ...]
         super().__init__(); self._cells = cells; self._idx = 0
-        self.setFixedSize(70 * len(cells), 40)
+        self.setFixedHeight(54)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(110 * len(cells))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_index(self, i):
@@ -105,16 +107,20 @@ class SegToggle(QWidget):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height(); r = 9; n = len(self._cells); cw = w / n
         outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
-        f = QFont(); f.setPointSize(14); f.setBold(True); p.setFont(f)
-        for i, (label, col) in enumerate(self._cells):
-            x = i * cw
-            if i == self._idx:
+        fcode = QFont(); fcode.setPointSize(13); fcode.setBold(True)
+        fsub = QFont(); fsub.setPointSize(8); fsub.setBold(True)
+        for i, (code, sub, col) in enumerate(self._cells):
+            x = i * cw; active = i == self._idx
+            if active:
                 p.save(); p.setClipRect(QRectF(x, 0, cw, h))
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
-                p.restore(); p.setPen(QColor(C["panel"]))
-            else:
-                p.setPen(QColor(C["muted"]))
-            p.drawText(QRectF(x, 0, cw, h), Qt.AlignmentFlag.AlignCenter, label)
+                p.restore()
+            code_col = QColor(C["panel"]) if active else QColor(C["text"] if active else C["muted"])
+            sub_col = QColor(C["panel"]) if active else QColor(C["muted"])
+            p.setFont(fcode); p.setPen(code_col)
+            p.drawText(QRectF(x, h * 0.16, cw, h * 0.40), Qt.AlignmentFlag.AlignCenter, code)
+            p.setFont(fsub); p.setPen(sub_col)
+            p.drawText(QRectF(x + 3, h * 0.55, cw - 6, h * 0.36), Qt.AlignmentFlag.AlignCenter, sub)
         p.setPen(QPen(QColor(C["stroke"]), 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(outer, r, r)
         for i in range(1, n):
@@ -194,7 +200,7 @@ class _TempBar(QWidget):
 class TempGauge(QFrame):
     """Temperature stat as a colored bar gauge (green → warn → danger by zone)."""
     def __init__(self, vmax=80):
-        super().__init__(); self.setProperty("class", "card"); self.setFixedHeight(72); self._max = vmax
+        super().__init__(); self.setFixedHeight(72); self._max = vmax        # flat readout
         v = QVBoxLayout(self); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(4)
         v.addWidget(_lab("TEMPERATURE", "cardTitle"))
         row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -364,7 +370,7 @@ class PresetChip(Chip):
 
 
 def _readout(title, unit, color):
-    card = QFrame(); card.setProperty("class", "card"); card.setFixedHeight(72)
+    card = QFrame(); card.setFixedHeight(72)        # flat: read-only, not a card
     v = QVBoxLayout(card); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(2)
     v.addWidget(_lab(title, "cardTitle"))
     row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -386,7 +392,7 @@ class MainWindow(QWidget):
         self.setObjectName("root")
         self.setWindowTitle("MP305 — ISDT bench supply")
         self.resize(1180, 860)
-        self._sync = False; self._init_sp = False
+        self._sync = False; self._init_sp = False; self._last_errors = set()
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
         self.backend, self.is_real = make_backend(prefer_real)
@@ -410,9 +416,7 @@ class MainWindow(QWidget):
     def _topbar(self):
         bar = QFrame(); bar.setProperty("class", "topbar"); bar.setFixedHeight(62)
         h = QHBoxLayout(bar); h.setContentsMargins(18, 0, 16, 0); h.setSpacing(10)
-        t = QVBoxLayout(); t.setSpacing(0)
-        t.addWidget(_lab("⚡ MP305", "h1")); t.addWidget(_lab("smart bench power supply", "sub"))
-        h.addLayout(t); h.addStretch(1)
+        h.addWidget(_lab("⚡ MP305", "h1")); h.addStretch(1)
         self.badge = QLabel(); self.devlabel = _lab("—", "sub"); self.status = QLabel()
         self._set_badge("SIM" if not self.is_real else "USB", C["warn"] if not self.is_real else C["on"])
         self._set_status("○ Disconnected", C["muted"], tint=False)
@@ -439,6 +443,17 @@ class MainWindow(QWidget):
         self.ch_a.changed.connect(lambda x: None if self._sync else self.reqA.emit(x))
         v.addWidget(self.ch_v); v.addWidget(self.ch_a)
 
+        # over-current behaviour is a SETTING → it lives with the controls (matches WebLink's
+        # currentOver toggle in the control area): CC = current-limit, OCP = trip the output.
+        oc = QFrame(); oc.setProperty("class", "card"); oc.setFixedHeight(98)
+        ov = QVBoxLayout(oc); ov.setContentsMargins(16, 8, 16, 10); ov.setSpacing(6)
+        ov.addWidget(_lab("OVER-CURRENT", "cardTitle"))
+        self.cov = SegToggle([("CC", "Constant Current", C["warn"]),
+                              ("OCP", "Overcurrent Protection", C["danger"])])
+        self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
+        ov.addWidget(self.cov)
+        v.addWidget(oc)
+
         if isinstance(self.backend, SimBackend):
             self.ch_load = ChannelCard("SIM LOAD", "Ω", 100.0, C["pink"], 0, measured=False)
             self.ch_load.set_setpoint(self.backend.load)
@@ -455,46 +470,32 @@ class MainWindow(QWidget):
             prow.addWidget(b)
         pv.addLayout(prow); v.addWidget(pc)
 
-        lc = QFrame(); lc.setProperty("class", "card")
-        lv = QVBoxLayout(lc); lv.setContentsMargins(14, 10, 14, 12); lv.setSpacing(6)
-        lv.addWidget(_lab("EVENT LOG", "cardTitle"))
-        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setFont(mono(9, bold=False))
-        self.log.setStyleSheet(f"background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;")
-        lv.addWidget(self.log); v.addWidget(lc, 1)
-
-        self.btn_off = QPushButton("◼  ALL OFF"); self.btn_off.setObjectName("danger"); self.btn_off.setFixedHeight(42)
-        self.btn_off.clicked.connect(lambda: self.out_btn.setChecked(False))
-        v.addWidget(self.btn_off)
+        v.addStretch(1)
         self._set_enabled(False)
         return col
 
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
         col.addWidget(self._charts(), 1)
-        # over-current behaviour is a SELECTABLE setting → toggle (CC = current-limit, OCP =
-        # trip). CV/CC regulation status + OVP trip are read-only → lamps. The OCP trip
-        # overlaps the toggle, so the toggle's OCP cell doubles as that indicator.
-        strip = QHBoxLayout(); strip.setContentsMargins(4, 0, 4, 0); strip.setSpacing(16)
-        strip.addWidget(_lab("OVER-CURRENT", "cardTitle"))
-        self.cov = SegToggle([("CC", C["warn"]), ("OCP", C["danger"])])
-        self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
-        strip.addWidget(self.cov)
-        strip.addSpacing(26)
-        self.lamp_cv = Lamp("CV"); self.lamp_cc = Lamp("CC"); self.lamp_ovp = Lamp("OVP")
-        for L in (self.lamp_cv, self.lamp_cc, self.lamp_ovp):
-            strip.addWidget(L)
-        strip.addStretch(1)
-        col.addLayout(strip)
+        line = QFrame(); line.setFixedHeight(1); line.setStyleSheet(f"background:{C['stroke']};border:none;")
+        col.addWidget(line)
         stats = QHBoxLayout(); stats.setSpacing(14)
         self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = self._energy_card()
         self.temp_gauge = TempGauge(); self.r_time = _readout("RUNTIME", "", C["text"])
         stats.addWidget(self.r_pow[0], 1); stats.addWidget(self.r_energy[0], 1)
         stats.addWidget(self.temp_gauge, 1); stats.addWidget(self.r_time[0], 1)
         col.addLayout(stats)
+        # event log lives on the right now (the over-current setting took its place on the left)
+        lc = QFrame(); lc.setFixedHeight(132)        # flat; the QPlainTextEdit has its own border
+        lv = QVBoxLayout(lc); lv.setContentsMargins(0, 10, 0, 0); lv.setSpacing(6)
+        lv.addWidget(_lab("EVENT LOG", "cardTitle"))
+        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setFont(mono(9, bold=False))
+        self.log.setStyleSheet(f"background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;")
+        lv.addWidget(self.log); col.addWidget(lc)
         return col
 
     def _energy_card(self):
-        ec = QFrame(); ec.setProperty("class", "card"); ec.setFixedHeight(72)
+        ec = QFrame(); ec.setFixedHeight(72)        # flat readout; only the ↻ reset is a button
         v = QVBoxLayout(ec); v.setContentsMargins(16, 8, 12, 10); v.setSpacing(2)
         tr = QHBoxLayout(); tr.addWidget(_lab("ENERGY", "cardTitle")); tr.addStretch(1)
         btn = QPushButton("↻"); btn.setFixedSize(26, 22); btn.setToolTip("Reset energy")
@@ -517,8 +518,8 @@ class MainWindow(QWidget):
 
     def _charts(self):
         pg.setConfigOptions(antialias=True)
-        wrap = QFrame(); wrap.setProperty("class", "card"); lay = QVBoxLayout(wrap); lay.setContentsMargins(8, 8, 8, 8)
-        glw = pg.GraphicsLayoutWidget(); glw.setBackground(C["card"])
+        wrap = QFrame(); lay = QVBoxLayout(wrap); lay.setContentsMargins(0, 0, 0, 0)   # flat
+        glw = pg.GraphicsLayoutWidget(); glw.setBackground(C["bg"])
         self.p_v = glw.addPlot(row=0, col=0); self.p_i = glw.addPlot(row=1, col=0)
         for p, unit in ((self.p_v, "V"), (self.p_i, "A")):
             p.showGrid(x=True, y=True, alpha=0.12); p.setMouseEnabled(x=False, y=False)
@@ -548,7 +549,7 @@ class MainWindow(QWidget):
         (self.reqConnect if self.btn_conn.text() == "Connect" else self.reqDisconnect).emit()
 
     def _set_enabled(self, on):
-        for w in (self.out_btn, self.ch_v, self.ch_a, self.btn_off):
+        for w in (self.out_btn, self.ch_v, self.ch_a, self.cov):
             w.setEnabled(on)
 
     def _apply_preset(self, v, a):
@@ -616,7 +617,6 @@ class MainWindow(QWidget):
         self._sync = True
         self.cov.set_index(st.get("current_over", 0))   # the over-current toggle (selectable)
         self._sync = False
-        self.lamp_cv.set(is_cv, C["on"]); self.lamp_cc.set(is_cc, C["warn"])
 
         self.r_pow[1].setText(f"{st['power']:.2f}"); self.r_energy[1].setText(f"{st['energy']:.3f}")
         self.temp_gauge.set(st["temperature"])
@@ -624,7 +624,13 @@ class MainWindow(QWidget):
         h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
         self.r_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-        self.lamp_ovp.set("errorDcOutOVP" in st.get("errors", []), C["danger"])
+        # protections (OVP/OCP) surface as error alerts, not LEDs — exactly like the WebLink
+        errs = set(st.get("errors", []))
+        labels = {"errorDcOutOVP": "OVER-VOLTAGE PROTECTION tripped",
+                  "errorDcOutOCP": "OVER-CURRENT PROTECTION tripped"}
+        for e in errs - self._last_errors:
+            self._logline(f"⚠ {labels.get(e, e)}", C["danger"])
+        self._last_errors = errs
 
         t = time.monotonic() - self._t0
         self._t.append(t); self._v.append(st["voltage"]); self._i.append(st["current"])
