@@ -55,7 +55,7 @@ Left — DC-mode controls:
 - **Sim load** (Ω) so you can watch CV→CC behaviour (and OCP trips) with no hardware.
 
 Right — read-outs (flat):
-- **Live charts** (60 s) of measured voltage and current.
+- **Live charts** (60 s) of measured voltage and current (a `↻` button clears the history).
 - **Power / Energy / Temperature gauge / Runtime** (Energy has a `↻` reset — the one button).
 
 Full width, under both columns — a **collapsible Event log**: timestamped, colour-coded;

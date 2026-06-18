@@ -81,6 +81,7 @@ class OutputButton(QPushButton):
     def __init__(self, on_text="⏻   OUTPUT ON", off_text="⏻   OUTPUT OFF"):
         super().__init__()
         self._on_text, self._off_text = on_text, off_text
+        self.setText(off_text)        # initial label (toggled only fires on change, not at start)
         self.setCheckable(True); self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(92)
         self._mix = 0.0                       # 0 = OFF (red), 1 = ON (green)
@@ -816,7 +817,14 @@ class MainWindow(QWidget):
 
     def _charts(self):
         pg.setConfigOptions(antialias=True)
-        wrap = QFrame(); lay = QVBoxLayout(wrap); lay.setContentsMargins(0, 0, 0, 0)   # flat
+        wrap = QFrame(); lay = QVBoxLayout(wrap); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(2)  # flat
+        hdr = QHBoxLayout(); hdr.setContentsMargins(0, 0, 2, 0); hdr.addStretch(1)
+        self.btn_chart_reset = QPushButton("↻"); self.btn_chart_reset.setFixedSize(26, 22)
+        self.btn_chart_reset.setToolTip("Clear chart history"); self.btn_chart_reset.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_chart_reset.setStyleSheet(f"padding:0;font-weight:800;border-radius:6px;"
+                                           f"background:{C['card_hi']};border:1px solid {C['stroke']};")
+        self.btn_chart_reset.clicked.connect(self._reset_chart)
+        hdr.addWidget(self.btn_chart_reset); lay.addLayout(hdr)
         glw = pg.GraphicsLayoutWidget(); glw.setBackground(C["bg"])
         self.p_v = glw.addPlot(row=0, col=0); self.p_i = glw.addPlot(row=1, col=0)
         for p, unit in ((self.p_v, "V"), (self.p_i, "A")):
@@ -829,6 +837,11 @@ class MainWindow(QWidget):
         self.curve_v = self.p_v.plot(pen=pg.mkPen(C["volt"], width=2))
         self.curve_i = self.p_i.plot(pen=pg.mkPen(C["curr"], width=2))
         lay.addWidget(glw); return wrap
+
+    def _reset_chart(self):
+        self._t.clear(); self._v.clear(); self._i.clear(); self._t0 = time.monotonic()
+        self.curve_v.setData([], []); self.curve_i.setData([], [])
+        self._logline("chart cleared", C["accent"])
 
     # ---- worker
     def _start_worker(self):

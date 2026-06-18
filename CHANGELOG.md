@@ -4,6 +4,15 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.5.2
+
+### Fixed
+- **GUI**: the OUTPUT button opened **red with no label** — the kinetic-pass refactor moved the
+  text into the toggle handler, which doesn't fire at startup. It's now labelled from the start.
+
+### Added
+- **GUI**: a `↻` button on the charts to **clear the rolling history** (reset the 60 s window).
+
 ## 0.5.1
 
 ### Changed
