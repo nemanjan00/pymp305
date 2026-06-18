@@ -32,7 +32,9 @@ Left — controls:
 - **Output** — one big green/red card-button (huge hit target; state unmistakable). It *is*
   the on/off, so there's no separate "all off".
 - **Voltage / Current channel cards** — measured value (big) + a tappable **SET** sub-row;
-  the active channel highlights with a `CV`/`CC` tag (the device's regulation status).
+  the active channel highlights with a `CV`/`CC` tag (the device's regulation status). When the
+  output is **off**, the card swaps to show the **set-point** as the big number (with a `SET`
+  tag) so your configured V/A stays readable instead of a meaningless 0.
 - **Keypad** — tap a channel for an on-screen pad with **digit + unit** buttons
   (`9`→`V`, `1500`→`mA`); exact entry, no keyboard.
 - **Over-current** — a `CC | OCP` toggle (with descriptions, like the WebLink): the device's

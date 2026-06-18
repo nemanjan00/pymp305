@@ -4,6 +4,16 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.6
+
+### Changed
+- **GUI readability/polish**: channel cards now **swap** with output state — the **set-point**
+  becomes the big number while the output is OFF (with a `SET` tag), and the live measurement
+  is big while ON. The over-current `CC | OCP` toggle scales up to fill the left column (so it
+  matches the right column's height) with larger type; the SIM LOAD value matches the other
+  readouts; preset button-group corners are fixed (square inner, only the group's outer bottoms
+  rounded). Added a keypad-over-dashboard screenshot.
+
 ## 0.4.5
 
 ### Fixed

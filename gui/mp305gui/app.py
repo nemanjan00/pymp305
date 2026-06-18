@@ -89,8 +89,8 @@ class SegToggle(QWidget):
 
     def __init__(self, cells):                       # cells = [(code, description, color), ...]
         super().__init__(); self._cells = cells; self._idx = 0
-        self.setFixedHeight(54)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(58)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumWidth(110 * len(cells))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -107,20 +107,23 @@ class SegToggle(QWidget):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height(); r = 13; n = len(self._cells); cw = w / n   # card-shaped
         outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
-        fcode = QFont(); fcode.setPointSize(13); fcode.setBold(True)
-        fsub = QFont(); fsub.setPointSize(8); fsub.setBold(True)
+        code_pt = int(max(14, min(26, h * 0.20)))    # scale the code with the cell height
+        sub_pt = int(max(8, min(10, h * 0.075)))      # cap: the descriptions are long, must not clip
+        fcode = QFont(); fcode.setPointSize(code_pt); fcode.setBold(True)
+        fsub = QFont(); fsub.setPointSize(sub_pt); fsub.setBold(True)
+        mid = h / 2
         for i, (code, sub, col) in enumerate(self._cells):
             x = i * cw; active = i == self._idx
             if active:
                 p.save(); p.setClipRect(QRectF(x, 0, cw, h))
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
                 p.restore()
-            code_col = QColor(C["panel"]) if active else QColor(C["text"] if active else C["muted"])
+            code_col = QColor(C["panel"]) if active else QColor(C["muted"])
             sub_col = QColor(C["panel"]) if active else QColor(C["muted"])
             p.setFont(fcode); p.setPen(code_col)
-            p.drawText(QRectF(x, h * 0.16, cw, h * 0.40), Qt.AlignmentFlag.AlignCenter, code)
+            p.drawText(QRectF(x, mid - h * 0.30, cw, h * 0.32), Qt.AlignmentFlag.AlignCenter, code)
             p.setFont(fsub); p.setPen(sub_col)
-            p.drawText(QRectF(x + 3, h * 0.55, cw - 6, h * 0.36), Qt.AlignmentFlag.AlignCenter, sub)
+            p.drawText(QRectF(x + 3, mid + h * 0.02, cw - 6, h * 0.26), Qt.AlignmentFlag.AlignCenter, sub)
         p.setPen(QPen(QColor(C["stroke"]), 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(outer, r, r)
         for i in range(1, n):
@@ -273,6 +276,7 @@ class ChannelCard(QFrame):
         self._unit, self._title, self._max = unit, title, vmax
         self._dec, self._color, self._measured = dec, color, measured
         self._set = 0.0; self._active = False
+        self._out_on = False; self._meas_val = 0.0
         self._base = f"#chan{{background:{C['card']};border:1px solid {C['stroke']};border-radius:14px;}}"
         self._hover = f"#chan{{background:{C['card_hi']};border:1px solid {C['hover']};border-radius:14px;}}"
         self._act = f"#chan{{background:{C['card_hi']};border:2px solid {color};border-radius:14px;}}"
@@ -289,7 +293,7 @@ class ChannelCard(QFrame):
             mu = QLabel(unit); mu.setProperty("class", "unit"); mrow.addWidget(mu, 0, Qt.AlignmentFlag.AlignBottom)
             mrow.addStretch(1); v.addLayout(mrow)
         srow = QHBoxLayout()
-        self.setlab = QLabel(""); self.setlab.setFont(mono(28) if not measured else QFont())
+        self.setlab = QLabel(""); self.setlab.setFont(mono(34) if not measured else QFont())
         if not measured:
             self.setlab.setStyleSheet(f"color:{color};")
         srow.addWidget(self.setlab); srow.addStretch(1); srow.addWidget(_lab("tap ▸", "sub"))
@@ -300,21 +304,46 @@ class ChannelCard(QFrame):
 
     def set_measured(self, val):
         if self._measured:
-            self.meas.setText(f"{val:.{self._dec}f}")
+            self._meas_val = val
+            if self._out_on:
+                self.meas.setText(f"{val:.{self._dec}f}")
+
+    def set_live(self, on):
+        if self._measured and on != self._out_on:
+            self._out_on = on
+            self._refresh_primary()
+
+    def _refresh_primary(self):
+        # the BIG number is the live measurement while output is ON, but the SET-POINT while
+        # it's OFF — so the configured V/A stays big and readable instead of a meaningless 0.
+        if not self._measured:
+            return
+        if self._out_on:
+            self.meas.setText(f"{self._meas_val:.{self._dec}f}")
+            self.setlab.setText(f"SET  {self._set:.{self._dec}f} {self._unit}")
+        else:
+            self.meas.setText(f"{self._set:.{self._dec}f}")
+            self.setlab.setText("output off")
+            self.tag.setText("SET"); self.tag.setStyleSheet(f"color:{C['muted']};font-weight:800;letter-spacing:1px;")
+        self.meas.setStyleSheet(f"color:{self._color};")
+        self.setlab.setStyleSheet(f"color:{C['muted']};font-weight:700;")
 
     def set_setpoint(self, v, emit=False):
         self._set = max(0.0, min(self._max, round(v, self._dec)))
-        txt = f"{self._set:.{self._dec}f}"
-        self.setlab.setText(txt if not self._measured else f"SET  {txt} {self._unit}")
-        self.setlab.setStyleSheet(f"color:{self._color};" if not self._measured
-                                  else f"color:{C['muted']};font-weight:700;")
+        if self._measured:
+            self._refresh_primary()
+        else:
+            self.setlab.setText(f"{self._set:.{self._dec}f}")
+            self.setlab.setStyleSheet(f"color:{self._color};")
         if emit:
             self.changed.emit(self._set)
 
     def set_active(self, active, tag):
         self._active = active
         self.setStyleSheet(self._act if active else self._base)
-        self.tag.setText(("● " + tag) if active else "")
+        if self._out_on:                       # CV/CC tag only when live; when off the tag is "SET"
+            self.tag.setText(("● " + tag) if active else "")
+            self.tag.setStyleSheet(f"color:{self._color};font-weight:800;")
 
     def _open_keypad(self):
         units = self._UNITS.get(self._unit, [(self._unit, 1.0)])
@@ -349,11 +378,15 @@ class Chip(QPushButton):
         """Style as a member of a flush button group (no gaps; only the group's outer
         bottom corners are rounded, to sit edge-to-edge in a card)."""
         self.setFixedHeight(42)
-        rad = ("border-bottom-left-radius:13px;" if i == 0 else "") + \
-              ("border-bottom-right-radius:13px;" if i == n - 1 else "")
+        # pin ALL four corners (the global QPushButton border-radius would otherwise round the
+        # tops): only the group's outer bottom corners are rounded, the rest square.
+        bl = 13 if i == 0 else 0
+        br = 13 if i == n - 1 else 0
+        radii = (f"border-top-left-radius:0px;border-top-right-radius:0px;"
+                 f"border-bottom-left-radius:{bl}px;border-bottom-right-radius:{br}px;")
         right = f"border-right:1px solid {C['stroke']};" if i < n - 1 else ""
         self.setStyleSheet(
-            f"QPushButton {{ background:{C['card_hi']}; border:none; {right}{rad}"
+            f"QPushButton {{ background:{C['card_hi']}; border:none; {right}{radii}"
             f" padding:0; font-weight:700; color:{C['text']}; }}"
             f"QPushButton:hover {{ background:{C['hover']}; color:{C['accent']}; }}"
             f"QPushButton:disabled {{ color:{C['off']}; }}")
@@ -462,14 +495,14 @@ class MainWindow(QWidget):
 
         # over-current behaviour is a SETTING → it lives with the controls (matches WebLink's
         # currentOver toggle in the control area): CC = current-limit, OCP = trip the output.
-        oc = QFrame(); oc.setFixedHeight(86)        # no card: the toggle has its own border
-        ov = QVBoxLayout(oc); ov.setContentsMargins(2, 4, 2, 6); ov.setSpacing(6)
+        oc = QFrame()        # no card: the toggle has its own border
+        ov = QVBoxLayout(oc); ov.setContentsMargins(2, 4, 2, 0); ov.setSpacing(6)
         ov.addWidget(_lab("OVER-CURRENT", "cardTitle"))
         self.cov = SegToggle([("CC", "Constant Current", C["warn"]),
                               ("OCP", "Overcurrent Protection", C["danger"])])
         self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
-        ov.addWidget(self.cov)
-        v.addWidget(oc)
+        ov.addWidget(self.cov, 1)
+        v.addWidget(oc, 1)        # the toggle grows to fill, so the left column matches the right
 
         if isinstance(self.backend, SimBackend):
             self.ch_load = ChannelCard("SIM LOAD", "Ω", 100.0, C["pink"], 0, measured=False)
@@ -494,8 +527,7 @@ class MainWindow(QWidget):
             gl.addWidget(b, 1)
         pv.addWidget(grp); v.addWidget(pc)
 
-        v.addStretch(1)
-        self._set_enabled(False)
+        self._set_enabled(False)        # the over-current card (above) absorbs the slack now
         return col
 
     def _right_column(self):
@@ -668,6 +700,7 @@ class MainWindow(QWidget):
         # CV/CC is the device's regulation status (out_state: 2=CV, 1=CC) — read-only
         out_state = st.get("out_state", 0)
         is_cv, is_cc = out_state == 2, out_state == 1
+        self.ch_v.set_live(on); self.ch_a.set_live(on)
         self.ch_v.set_measured(st["voltage"]); self.ch_a.set_measured(st["current"])
         self.ch_v.set_active(is_cv, "CV"); self.ch_a.set_active(is_cc, "CC")
         self._sync = True
