@@ -4,6 +4,14 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.5.1
+
+### Changed
+- **GUI Charge/USB-PD polish** (consistent input language): chemistry is now a whole-card
+  button that opens a pointer-friendly **dropdown** (`Picker`), and cells is a **numeric keypad
+  card** like the other inputs — no more combo boxes. In USB-PD, the e-marker cable read-out is
+  **flat** (read-only) while the PD-profile rows read as clickable buttons.
+
 ## 0.5.0
 
 ### Added

@@ -21,7 +21,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
-    QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup, QComboBox,
+    QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup,
 )
 
 from .theme import C, STYLESHEET
@@ -458,6 +458,67 @@ class ChannelCard(QFrame):
         self.setStyleSheet(self._act if self._active else self._base)
 
 
+class Picker(QDialog):
+    """Pointer-friendly dropdown: a vertical list of big option buttons — tap one to pick."""
+    def __init__(self, title, options, current, parent=None):
+        super().__init__(parent); self.setModal(True); self._val = current
+        v = QVBoxLayout(self); v.setContentsMargins(16, 16, 16, 16); v.setSpacing(8)
+        v.addWidget(_lab(title, "cardTitle"))
+        for i, opt in enumerate(options):
+            b = QPushButton(str(opt)); b.setFixedHeight(44); b.setFont(mono(14))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if i == current:
+                b.setObjectName("primary")
+            b.clicked.connect(lambda _, idx=i: (setattr(self, "_val", idx), self.accept()))
+            v.addWidget(b)
+
+    def value(self):
+        return self._val
+
+
+class ChoiceCard(QFrame):
+    """A whole-card button showing the current choice; tap opens a dropdown (Picker)."""
+    changed = pyqtSignal(int)
+
+    def __init__(self, title, options, color):
+        super().__init__(); self.setObjectName("chan")
+        self._title, self._options, self._color, self._idx = title, options, color, 0
+        self._base = f"#chan{{background:{C['card']};border:1px solid {C['stroke']};border-radius:14px;}}"
+        self._hover = f"#chan{{background:{C['card_hi']};border:1px solid {C['hover']};border-radius:14px;}}"
+        self.setStyleSheet(self._base); self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(72)
+        v = QVBoxLayout(self); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(2)
+        v.addWidget(_lab(title, "cardTitle"))
+        row = QHBoxLayout()
+        self.val = QLabel(str(options[0]) if options else "—"); self.val.setFont(mono(22))
+        self.val.setStyleSheet(f"color:{color};")
+        row.addWidget(self.val); row.addStretch(1); row.addWidget(_lab("tap ▾", "sub"))
+        v.addLayout(row)
+
+    def value(self):
+        return self._idx
+
+    def set_index(self, i):
+        if self._options:
+            self._idx = max(0, min(len(self._options) - 1, int(i)))
+            self.val.setText(str(self._options[self._idx]))
+
+    def _open(self):
+        dlg = Picker(self._title, self._options, self._idx, self)
+        if dlg.exec():
+            self.set_index(dlg.value()); self.changed.emit(self._idx)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.pos()):
+            self._open()
+
+    def enterEvent(self, e):
+        self.setStyleSheet(self._hover)
+
+    def leaveEvent(self, e):
+        self.setStyleSheet(self._base)
+
+
 class Chip(QPushButton):
     def __init__(self, text):
         super().__init__(text)
@@ -643,33 +704,18 @@ class MainWindow(QWidget):
         pv.addWidget(grp); v.addWidget(pc)
         return page
 
-    def _combo_card(self, title, items, on_change):
-        card = QFrame(); card.setProperty("class", "card"); card.setFixedHeight(64)
-        cl = QVBoxLayout(card); cl.setContentsMargins(16, 8, 16, 8); cl.setSpacing(4)
-        cl.addWidget(_lab(title, "cardTitle"))
-        combo = QComboBox(); combo.addItems([str(x) for x in items])
-        combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        combo.setStyleSheet(
-            f"QComboBox{{background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;"
-            f"padding:3px 10px;color:{C['text']};font-weight:700;}}"
-            f"QComboBox::drop-down{{border:none;width:22px;}}"
-            f"QComboBox QAbstractItemView{{background:{C['card']};color:{C['text']};"
-            f"selection-background-color:{C['accent']};selection-color:{C['panel']};outline:none;}}")
-        combo.currentIndexChanged.connect(lambda i: None if self._sync else on_change(i))
-        cl.addWidget(combo)
-        return card, combo
-
     def _charge_page(self):
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(12)
         self.chg_btn = OutputButton("⚡   CHARGING", "⚡   START CHARGE")
         self.chg_btn.toggled.connect(lambda on: None if self._sync else self.reqCharging.emit(on))
         v.addWidget(self.chg_btn)
-        chem_card, self.cmb_chem = self._combo_card("CHEMISTRY", CHEMS,
-                                                    lambda i: self.reqCharge.emit({"chem": i}))
-        v.addWidget(chem_card)
-        cells_card, self.cmb_cells = self._combo_card("CELLS (S)", list(range(1, 13)),
-                                                      lambda i: self.reqCharge.emit({"cells": i + 1}))
-        v.addWidget(cells_card)
+        self.ch_chem = ChoiceCard("CHEMISTRY", CHEMS, C["accent"])
+        self.ch_chem.changed.connect(lambda i: None if self._sync else self.reqCharge.emit({"chem": i}))
+        v.addWidget(self.ch_chem)
+        self.ch_cells = ChannelCard("CELLS", "S", 24, C["pow"], 0, measured=False)
+        self.ch_cells.set_setpoint(3)
+        self.ch_cells.changed.connect(lambda x: None if self._sync else self.reqCharge.emit({"cells": int(x)}))
+        v.addWidget(self.ch_cells)
         self.ch_chgA = ChannelCard("CHARGE CURRENT", "A", 10.0, C["pow"], 2, measured=False)
         self.ch_chgA.set_setpoint(1.0)
         self.ch_chgA.changed.connect(lambda x: None if self._sync else self.reqCharge.emit({"current": x}))
@@ -688,8 +734,8 @@ class MainWindow(QWidget):
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
         self._pdo_btns = []
         v.addStretch(1)
-        em = QFrame(); em.setProperty("class", "card"); em.setFixedHeight(60)
-        eml = QVBoxLayout(em); eml.setContentsMargins(16, 8, 16, 8); eml.setSpacing(4)
+        em = QFrame(); em.setFixedHeight(58)        # flat: e-marker is read-only cable info
+        eml = QVBoxLayout(em); eml.setContentsMargins(2, 8, 2, 0); eml.setSpacing(4)
         eml.addWidget(_lab("USB-C CABLE", "cardTitle"))
         self._emark_lab = QLabel("—"); self._emark_lab.setFont(mono(10, bold=False))
         self._emark_lab.setStyleSheet(f"color:{C['curr']};"); self._emark_lab.setWordWrap(True)
@@ -927,8 +973,8 @@ class MainWindow(QWidget):
             if self.stack.currentIndex() != page:
                 self.stack.setCurrentIndex(page)
         # Charge panel
-        self.cmb_chem.setCurrentIndex(min(self.cmb_chem.count() - 1, st.get("chem", 0)))
-        self.cmb_cells.setCurrentIndex(max(0, min(self.cmb_cells.count() - 1, st.get("cells", 1) - 1)))
+        self.ch_chem.set_index(st.get("chem", 0))
+        self.ch_cells.set_setpoint(st.get("cells", 1))
         self.ch_chgA.set_setpoint(st.get("charge_current", 0.0))
         charging = bool(st.get("charging_ext", False))
         if self.chg_btn.isChecked() != charging:
