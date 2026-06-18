@@ -156,6 +156,10 @@ simulator driving a CV→CC transition).
 
 ![GUI screenshot](./gui/dashboard.png)
 
+Tap any value for the on-screen keypad (digits **and** unit buttons — no keyboard needed):
+
+![keypad over the dashboard](./gui/dashboard-keypad.png)
+
 ```bash
 cd gui && pip install -r requirements.txt && python run.py --demo
 ```

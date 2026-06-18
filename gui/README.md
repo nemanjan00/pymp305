@@ -54,9 +54,9 @@ toggle charge/discharge in sim), SIM/USB, model/fw, connection status, **Remote*
 remote control — releasing hands the knob back to the front panel and disables the on-screen
 controls, exactly like the device's `remoteCon` lockout), Connect/Disconnect.
 
-The on-screen keypad (tap any value to set it exactly — digits **and** unit buttons, no keyboard):
+Tap any value to open the on-screen keypad — digits **and** unit buttons, exact entry, no keyboard:
 
-<img src="./keypad.png" alt="keypad" width="220">
+![keypad over the dashboard](./dashboard-keypad.png)
 
 ## Architecture
 
