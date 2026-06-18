@@ -4,6 +4,16 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.2
+
+### Changed
+- **GUI redesign** (`gui/`): per-quantity instrument cards that merge measured + setpoint
+  (tap → keypad with digit/unit buttons); the limiting channel highlights and a **CV|CC**
+  segmented indicator make the mode obvious; big green/red output card-button; **no
+  scroll-to-change** (safety: a stray trackball scroll must never move the output);
+  battery status (charge/discharge toggle, pulsing-red near-empty); temperature bar gauge;
+  V+I presets (right-click to save). (Library unchanged.)
+
 ## 0.4.1
 
 ### Changed

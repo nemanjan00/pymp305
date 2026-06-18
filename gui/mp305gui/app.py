@@ -1,11 +1,13 @@
 """MP305 desktop dashboard — PyQt6 + pyqtgraph, Dracula-themed.
 
-Design priorities (v2):
-  * pointer-ONLY operation (target lab PC has a trackball, no keyboard): every value is set
-    with big stepper chips + scroll-nudge + one-click presets; no typing/Tab/Enter required.
-  * disciplined layout — controls keep their natural height, the chart absorbs slack.
-  * dense single-view instrument: hero V/I/P, dual CV/CC gauges, status lamps, event log.
-UI/UX takes cues from ISDT's WebLink + the hardware's single-screen density.
+Design:
+  * pointer-ONLY (trackball, no keyboard): tap a channel card → on-screen keypad (digits +
+    units); one-click V+I presets (right-click to save). No scroll-to-change — a stray
+    trackball scroll must never alter the output.
+  * each quantity is ONE instrument card: big measured value + a tappable SET sub-row, so
+    "set" and "measured" live together (no split, no duplicate setpoint readout).
+  * the limiting channel highlights (border + tag) and a CV|CC indicator shows the mode.
+  * output is one big green/red card-button. Disciplined layout; chart absorbs slack.
 """
 from __future__ import annotations
 
@@ -13,11 +15,11 @@ import time
 from collections import deque
 
 import pyqtgraph as pg
-from PyQt6.QtCore import (Qt, QThread, pyqtSignal, QPropertyAnimation, pyqtProperty, QRectF)
-from PyQt6.QtGui import QColor, QPainter, QPen, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF, QTimer, QPointF
+from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
-    QPlainTextEdit, QSizePolicy, QDialog, QGridLayout,
+    QGridLayout, QDialog, QPlainTextEdit, QSizePolicy,
 )
 
 from .theme import C, STYLESHEET
@@ -38,119 +40,180 @@ def _lab(text, cls):
     w = QLabel(text); w.setProperty("class", cls); return w
 
 
-def _card():
-    f = QFrame(); f.setProperty("class", "card")
-    f.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-    return f
+def _rgb(hexcol):
+    c = QColor(hexcol); return f"{c.red()},{c.green()},{c.blue()}"
 
 
 # ---------------------------------------------------------------- widgets
-class ToggleSwitch(QPushButton):
+class OutputButton(QPushButton):
+    """The whole OUTPUT card is one button — green ON, red OFF. Huge trackball target."""
     def __init__(self):
         super().__init__()
         self.setCheckable(True); self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(66, 36)
-        self._pos = 0.0
-        self._anim = QPropertyAnimation(self, b"knob", self); self._anim.setDuration(150)
-        self.toggled.connect(lambda on: (self._anim.stop(), self._anim.setStartValue(self._pos),
-                                         self._anim.setEndValue(1.0 if on else 0.0), self._anim.start()))
+        self.setFixedHeight(92)
+        self.toggled.connect(self._restyle); self._restyle(False)
 
-    def getKnob(self): return self._pos
-    def setKnob(self, v): self._pos = v; self.update()
-    knob = pyqtProperty(float, fget=getKnob, fset=setKnob)
-
-    def paintEvent(self, _):
-        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor(C["on"]) if self.isChecked() else QColor(C["stroke"]))
-        p.setPen(Qt.PenStyle.NoPen); p.drawRoundedRect(self.rect(), 18, 18)
-        d = 28; x = 4 + self._pos * (self.width() - d - 8)
-        p.setBrush(QColor(C["text"])); p.drawEllipse(QRectF(x, 4, d, d))
-
-
-class ArcGauge(QWidget):
-    """270° arc gauge with center numeral, quantity color, and a CV/CC tag."""
-    def __init__(self, label, color):
-        super().__init__()
-        self.setMinimumSize(150, 150)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._frac = 0.0; self._center = "0.00"; self._label = label
-        self._color = color; self._tag = ""; self._active = False
-
-    def set(self, frac, center, tag="", active=False):
-        self._frac = max(0.0, min(1.0, frac)); self._center = center
-        self._tag = tag; self._active = active; self.update()
-
-    def paintEvent(self, _):
-        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        side = min(self.width(), self.height() - 8)
-        m = 12; rect = QRectF((self.width() - side) / 2 + m, m, side - 2 * m, side - 2 * m)
-        start, span = 225 * 16, -270 * 16
-        p.setPen(QPen(QColor(C["stroke"]), 12, cap=Qt.PenCapStyle.RoundCap)); p.drawArc(rect, start, span)
-        pen = QPen(QColor(self._color), 12, cap=Qt.PenCapStyle.RoundCap)
-        p.setPen(pen); p.drawArc(rect, start, int(span * self._frac))
-        p.setPen(QColor(C["text"])); f = mono(22); p.setFont(f)
-        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._center)
-        p.setPen(QColor(C["muted"])); f2 = QFont(); f2.setPointSize(9); f2.setBold(True); p.setFont(f2)
-        p.drawText(rect.adjusted(0, rect.height() * 0.62, 0, 0),
-                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._label)
-        if self._tag:
-            p.setPen(QColor(self._color if self._active else C["muted"]))
-            ft = QFont(); ft.setPointSize(10); ft.setBold(True); p.setFont(ft)
-            p.drawText(self.rect().adjusted(0, 6, -8, 0),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, self._tag)
+    def _restyle(self, on):
+        col = C["on"] if on else C["danger"]; rgb = _rgb(col)
+        self.setText("⏻   OUTPUT ON" if on else "⏻   OUTPUT OFF")
+        self.setStyleSheet(
+            f"QPushButton{{background:rgba({rgb},0.15);color:{col};border:2px solid {col};"
+            f"border-radius:14px;font-size:23px;font-weight:800;letter-spacing:2px;}}"
+            f"QPushButton:hover{{background:rgba({rgb},0.26);}}"
+            f"QPushButton:disabled{{background:{C['card']};color:{C['off']};border:1px solid {C['stroke']};}}")
 
 
 class Lamp(QWidget):
     def __init__(self, label):
         super().__init__()
-        self.setFixedHeight(20); self._on = False; self._color = C["off"]; self._label = label
+        self.setFixedHeight(20); self.setMinimumWidth(28 + len(label) * 9)
+        self._on = False; self._color = C["off"]; self._label = label
 
     def set(self, on, color):
-        self._on = on; self._color = color; self.update()
+        self._on, self._color = on, color; self.update()
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        col = QColor(self._color) if self._on else QColor(C["stroke"])
-        p.setBrush(col); p.setPen(Qt.PenStyle.NoPen); p.drawEllipse(QRectF(0, 4, 12, 12))
+        p.setBrush(QColor(self._color) if self._on else QColor(C["stroke"]))
+        p.setPen(Qt.PenStyle.NoPen); p.drawEllipse(QRectF(0, 4, 12, 12))
         p.setPen(QColor(C["text"] if self._on else C["muted"]))
         f = QFont(); f.setPointSize(9); f.setBold(True); p.setFont(f)
         p.drawText(self.rect().adjusted(20, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, self._label)
 
 
-class Chip(QPushButton):
-    def __init__(self, text):
-        super().__init__(text)
-        self.setFixedHeight(40); self.setMinimumWidth(0)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        f = QFont(); f.setPointSize(10); f.setBold(True); self.setFont(f)
-        self.setStyleSheet("padding: 0 2px;")   # override the global 16px button padding
+class CVCCIndicator(QWidget):
+    """Segmented [ CV | CC ] indicator — the active (limiting) mode lights up; both dim when
+    the output is off. It's a status display, not a control (the device decides CV vs CC)."""
+    def __init__(self):
+        super().__init__(); self.setFixedSize(150, 52); self._mode = None
+
+    def set_mode(self, mode):   # "CV" | "CC" | None
+        self._mode = mode; self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.setPen(QPen(QColor(C["stroke"]), 1)); p.setBrush(QColor(C["bg"]))
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 10, 10)
+        f = QFont(); f.setPointSize(15); f.setBold(True); p.setFont(f)
+        for i, (label, col) in enumerate((("CV", C["on"]), ("CC", C["warn"]))):
+            cw = w / 2; x = i * cw; cell = QRectF(x, 0, cw, h)
+            if self._mode == label:
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col))
+                p.drawRoundedRect(QRectF(x + 3, 3, cw - 6, h - 6), 8, 8)
+                p.setPen(QColor(C["panel"]))
+            else:
+                p.setPen(QColor(C["muted"]))
+            p.drawText(cell, Qt.AlignmentFlag.AlignCenter, label)
+
+
+class BatteryWidget(QWidget):
+    """Battery glyph + % for the MP305B's internal cell: color by level, charging bolt,
+    and a pulsing red when near-empty. Click toggles charge/discharge (sim)."""
+    clicked = pyqtSignal()
+    LOW = 15
+
+    def __init__(self):
+        super().__init__(); self.setFixedSize(82, 24)
+        self._pct = None; self._charging = False; self._pulse = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Internal cell — click to toggle charge/discharge")
+        self._timer = QTimer(self); self._timer.timeout.connect(self._tick); self._timer.start(550)
+
+    def set(self, pct, charging=False):
+        self._pct = None if pct is None else max(0, min(100, int(pct)))
+        self._charging = bool(charging); self.update()
+
+    def _low(self):
+        return self._pct is not None and self._pct <= self.LOW and not self._charging
+
+    def _tick(self):
+        if self._low():
+            self._pulse = not self._pulse; self.update()
+        elif self._pulse:
+            self._pulse = False; self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        bw, bh = 28, 15; y = (self.height() - bh) / 2
+        pct = self._pct if self._pct is not None else 0
+        col = C["on"] if pct > 50 else C["warn"] if pct > self.LOW else C["danger"]
+        fill = QColor(col)
+        if self._low():
+            fill.setAlpha(255 if self._pulse else 70)
+        p.setPen(QPen(QColor(col if self._low() and self._pulse else C["muted"]), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush); p.drawRoundedRect(QRectF(1, y, bw, bh), 2, 2)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(C["muted"]))
+        p.drawRect(QRectF(bw + 2, y + 4.5, 3, bh - 9))
+        if self._pct is not None:
+            p.setBrush(fill); p.drawRoundedRect(QRectF(3, y + 2, (bw - 4) * pct / 100.0, bh - 4), 1, 1)
+        if self._charging:   # bolt over the fill
+            bx, by = 11, y + 2
+            pts = [(4, 0), (0, 7), (3, 7), (1, 12), (8, 4.5), (4.5, 4.5)]
+            p.setBrush(QColor(C["panel"])); p.setPen(Qt.PenStyle.NoPen)
+            p.drawPolygon(QPolygonF([QPointF(bx + a, by + b) for a, b in pts]))
+        p.setPen(QColor(C["text"] if self._pct is not None else C["muted"]))
+        f = QFont(); f.setPointSize(9); f.setBold(True); p.setFont(f)
+        p.drawText(QRectF(bw + 9, 0, self.width() - bw - 9, self.height()),
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   f"{pct}%" if self._pct is not None else "—")
+
+
+class _TempBar(QWidget):
+    def __init__(self):
+        super().__init__(); self.setFixedHeight(6); self._f = 0.0; self._c = C["on"]
+
+    def set(self, frac, col):
+        self._f = max(0.0, min(1.0, frac)); self._c = col; self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height(); p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(C["stroke"])); p.drawRoundedRect(QRectF(0, 0, w, h), 3, 3)
+        p.setBrush(QColor(self._c)); p.drawRoundedRect(QRectF(0, 0, w * self._f, h), 3, 3)
+
+
+class TempGauge(QFrame):
+    """Temperature stat as a colored bar gauge (green → warn → danger by zone)."""
+    def __init__(self, vmax=80):
+        super().__init__(); self.setProperty("class", "card"); self.setFixedHeight(72); self._max = vmax
+        v = QVBoxLayout(self); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(4)
+        v.addWidget(_lab("TEMPERATURE", "cardTitle"))
+        row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.val = QLabel("—"); self.val.setFont(mono(17)); row.addWidget(self.val)
+        u = QLabel("°C"); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
+        row.addStretch(1); v.addLayout(row)
+        self.bar = _TempBar(); v.addWidget(self.bar)
+
+    def set(self, t):
+        col = C["on"] if t < 50 else C["warn"] if t < 65 else C["danger"]
+        self.val.setText(f"{t}"); self.val.setStyleSheet(f"color:{col};")
+        self.bar.set(t / self._max, col)
 
 
 class Keypad(QDialog):
-    """Big pointer-operable numeric keypad for exact entry without a keyboard."""
+    """Big pointer-operable keypad: digits + unit buttons (e.g. 9→V, 1500→mA). No keyboard."""
     def __init__(self, title, value, unit, vmax, dec, units, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title); self.setModal(True)
-        self._max = vmax; self._dec = dec
-        self._units = units; self._mult = units[0][1]
+        self._max, self._dec, self._mult = vmax, dec, units[0][1]
         self._s = f"{value:.{dec}f}" if dec else f"{int(value)}"
         v = QVBoxLayout(self); v.setContentsMargins(16, 16, 16, 16); v.setSpacing(10)
         v.addWidget(_lab(f"{title}  ({unit}, max {vmax:g})", "cardTitle"))
         self._disp = QLabel(self._s); self._disp.setFont(mono(30))
         self._disp.setStyleSheet(f"color:{C['accent']};background:{C['bg']};"
                                  f"border:1px solid {C['stroke']};border-radius:10px;padding:8px 12px;")
-        self._disp.setAlignment(Qt.AlignmentFlag.AlignRight)
-        v.addWidget(self._disp)
+        self._disp.setAlignment(Qt.AlignmentFlag.AlignRight); v.addWidget(self._disp)
         grid = QGridLayout(); grid.setSpacing(8)
-        keys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "⌫"]
-        for i, k in enumerate(keys):
+        for i, k in enumerate(["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "⌫"]):
             b = QPushButton(k); b.setFixedSize(78, 56); b.setFont(mono(16))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.clicked.connect(lambda _, key=k: self._key(key))
-            grid.addWidget(b, i // 3, i % 3)
+            b.clicked.connect(lambda _, key=k: self._key(key)); grid.addWidget(b, i // 3, i % 3)
         v.addLayout(grid)
-        # unit buttons commit the entry (e.g. "9" then "V", or "1500" then "mA")
         bot = QHBoxLayout(); bot.setSpacing(8)
         cancel = QPushButton("Cancel"); cancel.setFixedHeight(46); cancel.clicked.connect(self.reject)
         bot.addWidget(cancel)
@@ -178,60 +241,124 @@ class Keypad(QDialog):
             return 0.0
 
 
-class Setpoint(QFrame):
-    """Pointer-only setpoint editor: tap the value for an on-screen keypad (exact entry),
-    stepper chips for fine nudges, scroll-wheel to bump, presets for instant rails. No keyboard."""
+class ChannelCard(QFrame):
+    """One instrument channel: big measured value + a tappable SET sub-row, in one card.
+    Tap anywhere to edit the setpoint via the keypad. Highlights when it's the limiting one."""
     changed = pyqtSignal(float)
-
-    def __init__(self, title, unit, vmax, color, steps):
-        super().__init__()
-        self.setProperty("class", "card")
-        self._val = 0.0; self._max = vmax; self._steps = steps
-        self._title, self._unit = title, unit
-        _decs = [len(str(s).split(".")[-1]) for s in steps if "." in str(s)]
-        self._dec = max(_decs) if _decs else 0
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        v = QVBoxLayout(self); v.setContentsMargins(16, 12, 16, 12); v.setSpacing(8)
-        v.addWidget(_lab(title, "cardTitle"))
-        row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self._val_btn = QPushButton("0.00"); self._val_btn.setFont(mono(28))
-        self._val_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._val_btn.setToolTip("Tap for keypad (exact entry)")
-        self._val_btn.setStyleSheet(
-            f"QPushButton{{background:transparent;border:none;color:{color};text-align:left;padding:0;}}"
-            f"QPushButton:hover{{color:{C['accent_hi']};}}")
-        self._val_btn.clicked.connect(self._open_keypad)
-        row.addWidget(self._val_btn)
-        u = QLabel(unit); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
-        row.addStretch(1)
-        v.addLayout(row)
-        chips = QHBoxLayout(); chips.setSpacing(6)
-        for s in steps:
-            b = Chip(f"−{s:g}"); b.clicked.connect(lambda _, d=-s: self._nudge(d)); chips.addWidget(b)
-        for s in reversed(steps):
-            b = Chip(f"+{s:g}"); b.clicked.connect(lambda _, d=s: self._nudge(d)); chips.addWidget(b)
-        v.addLayout(chips)
-
     _UNITS = {"V": [("V", 1.0), ("mV", 0.001)], "A": [("A", 1.0), ("mA", 0.001)]}
+
+    def __init__(self, title, unit, vmax, color, dec, measured=True):
+        super().__init__()
+        self.setObjectName("chan")
+        self._unit, self._title, self._max = unit, title, vmax
+        self._dec, self._color, self._measured = dec, color, measured
+        self._set = 0.0; self._active = False
+        self._base = f"#chan{{background:{C['card']};border:1px solid {C['stroke']};border-radius:14px;}}"
+        self._hover = f"#chan{{background:{C['card_hi']};border:1px solid {C['hover']};border-radius:14px;}}"
+        self._act = f"#chan{{background:{C['card_hi']};border:2px solid {color};border-radius:14px;}}"
+        self.setStyleSheet(self._base); self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(98 if measured else 84)
+        v = QVBoxLayout(self); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(4)
+        top = QHBoxLayout(); top.addWidget(_lab(title, "cardTitle")); top.addStretch(1)
+        self.tag = QLabel(""); self.tag.setStyleSheet(f"color:{color};font-weight:800;")
+        top.addWidget(self.tag); v.addLayout(top)
+        if measured:
+            mrow = QHBoxLayout(); mrow.setSpacing(6); mrow.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            self.meas = QLabel("—"); self.meas.setFont(mono(34)); self.meas.setStyleSheet(f"color:{color};")
+            mrow.addWidget(self.meas)
+            mu = QLabel(unit); mu.setProperty("class", "unit"); mrow.addWidget(mu, 0, Qt.AlignmentFlag.AlignBottom)
+            mrow.addStretch(1); v.addLayout(mrow)
+        srow = QHBoxLayout()
+        self.setlab = QLabel(""); self.setlab.setFont(mono(28) if not measured else QFont())
+        if not measured:
+            self.setlab.setStyleSheet(f"color:{color};")
+        srow.addWidget(self.setlab); srow.addStretch(1); srow.addWidget(_lab("tap ▸", "sub"))
+        v.addLayout(srow)
+        self.set_setpoint(0.0)
+
+    def value(self): return self._set
+
+    def set_measured(self, val):
+        if self._measured:
+            self.meas.setText(f"{val:.{self._dec}f}")
+
+    def set_setpoint(self, v, emit=False):
+        self._set = max(0.0, min(self._max, round(v, self._dec)))
+        txt = f"{self._set:.{self._dec}f}"
+        self.setlab.setText(txt if not self._measured else f"SET  {txt} {self._unit}")
+        self.setlab.setStyleSheet(f"color:{self._color};" if not self._measured
+                                  else f"color:{C['muted']};font-weight:700;")
+        if emit:
+            self.changed.emit(self._set)
+
+    def set_active(self, active, tag):
+        self._active = active
+        self.setStyleSheet(self._act if active else self._base)
+        self.tag.setText(("● " + tag) if active else "")
 
     def _open_keypad(self):
         units = self._UNITS.get(self._unit, [(self._unit, 1.0)])
-        dlg = Keypad(self._title, self._val, self._unit, self._max, self._dec, units, self)
+        dlg = Keypad(self._title, self._set, self._unit, self._max, self._dec, units, self)
         if dlg.exec():
-            self.set_value(dlg.value(), emit=True)
+            self.set_setpoint(dlg.value(), emit=True)
 
-    def value(self): return self._val
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.pos()):
+            self._open_keypad()
 
-    def set_value(self, v, emit=False):
-        self._val = max(0.0, min(self._max, round(v, self._dec)))
-        self._val_btn.setText(f"{self._val:.{self._dec}f}")
-        if emit:
-            self.changed.emit(self._val)
+    # no wheelEvent by design: a stray trackball scroll must never change the output.
 
-    def _nudge(self, d): self.set_value(self._val + d, emit=True)
+    def enterEvent(self, e):
+        if not self._active:
+            self.setStyleSheet(self._hover)
 
-    def wheelEvent(self, e):
-        self._nudge(self._steps[1] * (1 if e.angleDelta().y() > 0 else -1))
+    def leaveEvent(self, e):
+        self.setStyleSheet(self._act if self._active else self._base)
+
+
+class Chip(QPushButton):
+    def __init__(self, text):
+        super().__init__(text)
+        self.setFixedHeight(40); self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        f = QFont(); f.setPointSize(10); f.setBold(True); self.setFont(f)
+        self.setStyleSheet("padding: 0 2px;")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+
+class PresetChip(Chip):
+    """One-click V+I recall; right-click stores the current setpoint into the slot."""
+    applied = pyqtSignal(float, float)
+    saveReq = pyqtSignal(object)
+
+    def __init__(self, v, a):
+        super().__init__(""); self.v, self.a = v, a; self._refresh()
+        self.clicked.connect(lambda: self.applied.emit(self.v, self.a))
+
+    def _refresh(self):
+        self.setText(f"{self.v:g}V")
+        self.setToolTip(f"{self.v:g} V / {self.a:g} A — right-click to save current")
+
+    def store(self, v, a):
+        self.v, self.a = round(v, 2), round(a, 3); self._refresh()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.RightButton:
+            self.saveReq.emit(self)
+        else:
+            super().mousePressEvent(e)
+
+
+def _readout(title, unit, color):
+    card = QFrame(); card.setProperty("class", "card"); card.setFixedHeight(72)
+    v = QVBoxLayout(card); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(2)
+    v.addWidget(_lab(title, "cardTitle"))
+    row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+    val = QLabel("—"); val.setFont(mono(17)); val.setStyleSheet(f"color:{color};"); row.addWidget(val)
+    if unit:
+        u = QLabel(unit); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
+    row.addStretch(1); v.addLayout(row)
+    return card, val
 
 
 # ---------------------------------------------------------------- main window
@@ -243,22 +370,26 @@ class MainWindow(QWidget):
         super().__init__()
         self.setObjectName("root")
         self.setWindowTitle("MP305 — ISDT bench supply")
-        self.resize(1280, 900)
+        self.resize(1180, 860)
         self._sync = False; self._init_sp = False
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
         self.backend, self.is_real = make_backend(prefer_real)
         self._build_ui(); self._start_worker()
+        self.batt.clicked.connect(self._toggle_charge)
         self.reqConnect.emit()
 
-    # ---- layout
+    def _toggle_charge(self):
+        fn = getattr(self.backend, "toggle_charging", None)
+        if fn is not None:
+            self._logline(f"battery {'charging' if fn() else 'discharging'}", C["accent"])
+
     def _build_ui(self):
         root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
         root.addWidget(self._topbar())
-        body = QWidget(); bl = QHBoxLayout(body)
-        bl.setContentsMargins(14, 12, 14, 14); bl.setSpacing(14)
+        body = QWidget(); bl = QHBoxLayout(body); bl.setContentsMargins(14, 12, 14, 14); bl.setSpacing(14)
         bl.addWidget(self._left_column(), 0)
-        bl.addLayout(self._dashboard(), 1)
+        bl.addLayout(self._right_column(), 1)
         root.addWidget(body, 1)
 
     def _topbar(self):
@@ -267,125 +398,82 @@ class MainWindow(QWidget):
         t = QVBoxLayout(); t.setSpacing(0)
         t.addWidget(_lab("⚡ MP305", "h1")); t.addWidget(_lab("smart bench power supply", "sub"))
         h.addLayout(t); h.addStretch(1)
-        self.badge = QLabel("SIM" if not self.is_real else "USB"); self.badge.setObjectName("pill")
-        self.badge.setStyleSheet(f"color:{C['warn'] if not self.is_real else C['on']};")
-        self.devlabel = _lab("—", "sub")
-        self.status = QLabel("Disconnected"); self.status.setObjectName("pill")
+        self.badge = QLabel(); self.devlabel = _lab("—", "sub"); self.status = QLabel()
+        self._set_badge("SIM" if not self.is_real else "USB", C["warn"] if not self.is_real else C["on"])
+        self._set_status("○ Disconnected", C["muted"], tint=False)
         self.btn_remote = QPushButton("Remote"); self.btn_remote.setCheckable(True); self.btn_remote.setChecked(True)
-        self.btn_remote.setToolTip("Take / release remote control")
+        self.btn_remote.setToolTip("Take / release remote control (front panel lockout)")
+        self.btn_remote.toggled.connect(self._style_remote); self._style_remote(True)
         self.btn_conn = QPushButton("Connect"); self.btn_conn.setObjectName("primary")
         self.btn_conn.clicked.connect(self._toggle_conn)
-        for w in (self.badge, self.devlabel, self.status, self.btn_remote, self.btn_conn):
+        self.batt = BatteryWidget(); self.batt.setToolTip("Internal cell")
+        for w in (self.batt, self.badge, self.devlabel, self.status, self.btn_remote, self.btn_conn):
             h.addWidget(w)
         return bar
 
     def _left_column(self):
-        col = QFrame(); col.setFixedWidth(340)
+        col = QFrame(); col.setFixedWidth(360)
         v = QVBoxLayout(col); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(12)
+        self.out_btn = OutputButton()
+        self.out_btn.toggled.connect(lambda on: None if self._sync else self.reqOut.emit(on))
+        v.addWidget(self.out_btn)
 
-        # output card
-        oc = _card(); oc.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        ov = QVBoxLayout(oc); ov.setContentsMargins(16, 12, 16, 12); ov.setSpacing(8)
-        r = QHBoxLayout(); r.addWidget(_lab("OUTPUT", "cardTitle")); r.addStretch(1)
-        self.toggle = ToggleSwitch()
-        self.toggle.toggled.connect(lambda on: None if self._sync else self.reqOut.emit(on))
-        r.addWidget(self.toggle); ov.addLayout(r)
-        self.out_state = QLabel("OFF"); self.out_state.setFont(mono(15)); self.out_state.setStyleSheet(f"color:{C['off']};")
-        ov.addWidget(self.out_state)
-        v.addWidget(oc)
-
-        # setpoints (pointer-only)
-        self.sp_v = Setpoint("SET VOLTAGE", "V", 30.0, C["volt"], [1, 0.1, 0.01])
-        self.sp_a = Setpoint("SET CURRENT", "A", 5.0, C["curr"], [1, 0.1, 0.01])
-        self.sp_v.changed.connect(lambda x: None if self._sync else self.reqV.emit(x))
-        self.sp_a.changed.connect(lambda x: None if self._sync else self.reqA.emit(x))
-        v.addWidget(self.sp_v); v.addWidget(self.sp_a)
-
-        # presets (one-click recall — the most trackball-friendly way to set V)
-        pc = _card(); pc.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        pv = QVBoxLayout(pc); pv.setContentsMargins(16, 10, 16, 12); pv.setSpacing(8)
-        pv.addWidget(_lab("PRESETS", "cardTitle"))
-        prow = QHBoxLayout(); prow.setSpacing(6)
-        for volts in (3.3, 5, 9, 12, 20):
-            b = Chip(f"{volts:g}V"); b.clicked.connect(lambda _, x=volts: self.sp_v.set_value(x, emit=True))
-            prow.addWidget(b)
-        pv.addLayout(prow)
-        v.addWidget(pc)
+        self.ch_v = ChannelCard("VOLTAGE", "V", 30.0, C["volt"], 2)
+        self.ch_a = ChannelCard("CURRENT", "A", 5.0, C["curr"], 3)
+        self.ch_v.changed.connect(lambda x: None if self._sync else self.reqV.emit(x))
+        self.ch_a.changed.connect(lambda x: None if self._sync else self.reqA.emit(x))
+        v.addWidget(self.ch_v); v.addWidget(self.ch_a)
 
         if isinstance(self.backend, SimBackend):
-            self.sp_load = Setpoint("SIM LOAD", "Ω", 100.0, C["pink"], [10, 1])
-            self.sp_load.set_value(self.backend.load)
-            self.sp_load.changed.connect(self.backend.set_load)
-            v.addWidget(self.sp_load)
+            self.ch_load = ChannelCard("SIM LOAD", "Ω", 100.0, C["pink"], 0, measured=False)
+            self.ch_load.set_setpoint(self.backend.load)
+            self.ch_load.changed.connect(self.backend.set_load)
+            v.addWidget(self.ch_load)
 
-        # event log absorbs the leftover vertical space (not the controls)
-        lc = _card(); lv = QVBoxLayout(lc); lv.setContentsMargins(14, 10, 14, 12); lv.setSpacing(6)
+        pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(74)
+        pv = QVBoxLayout(pc); pv.setContentsMargins(16, 10, 16, 12); pv.setSpacing(8)
+        pv.addWidget(_lab("PRESETS  (right-click saves)", "cardTitle"))
+        prow = QHBoxLayout(); prow.setSpacing(6)
+        for volts, amps in ((3.3, 3), (5, 3), (9, 3), (12, 5), (20, 5)):
+            b = PresetChip(volts, amps)
+            b.applied.connect(self._apply_preset); b.saveReq.connect(self._save_preset)
+            prow.addWidget(b)
+        pv.addLayout(prow); v.addWidget(pc)
+
+        lc = QFrame(); lc.setProperty("class", "card")
+        lv = QVBoxLayout(lc); lv.setContentsMargins(14, 10, 14, 12); lv.setSpacing(6)
         lv.addWidget(_lab("EVENT LOG", "cardTitle"))
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setFont(mono(9, bold=False))
         self.log.setStyleSheet(f"background:{C['bg']};border:1px solid {C['stroke']};border-radius:8px;")
-        lv.addWidget(self.log)
-        v.addWidget(lc, 1)
+        lv.addWidget(self.log); v.addWidget(lc, 1)
 
-        self.btn_off = QPushButton("◼  ALL OFF"); self.btn_off.setObjectName("danger")
-        self.btn_off.setFixedHeight(42)
-        self.btn_off.clicked.connect(lambda: self.toggle.setChecked(False))
+        self.btn_off = QPushButton("◼  ALL OFF"); self.btn_off.setObjectName("danger"); self.btn_off.setFixedHeight(42)
+        self.btn_off.clicked.connect(lambda: self.out_btn.setChecked(False))
         v.addWidget(self.btn_off)
         self._set_enabled(False)
         return col
 
-    def _dashboard(self):
+    def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
-        hero = QHBoxLayout(); hero.setSpacing(14)
-        self.card_v = self._readout("VOLTAGE", "V", C["volt"])
-        self.card_a = self._readout("CURRENT", "A", C["curr"])
-        self.card_w = self._readout("POWER", "W", C["pow"])
-        for c in (self.card_v[0], self.card_a[0], self.card_w[0]):
-            c.setFixedHeight(104); hero.addWidget(c, 1)
-        col.addLayout(hero)
-
-        mid = QHBoxLayout(); mid.setSpacing(14)
-        # gauges + lamps card
-        gc = _card(); gc.setFixedWidth(300)
-        gv = QVBoxLayout(gc); gv.setContentsMargins(14, 14, 14, 12); gv.setSpacing(8)
-        grow = QHBoxLayout(); grow.setSpacing(8)
-        self.gauge_v = ArcGauge("VOLTS", C["volt"]); self.gauge_a = ArcGauge("AMPS", C["curr"])
-        grow.addWidget(self.gauge_v); grow.addWidget(self.gauge_a)
-        gv.addLayout(grow, 1)
-        lamps = QHBoxLayout(); lamps.setSpacing(10)
-        self.lamp_out = Lamp("OUT"); self.lamp_cv = Lamp("CV"); self.lamp_cc = Lamp("CC")
+        col.addWidget(self._charts(), 1)
+        lampcard = QFrame(); lampcard.setProperty("class", "card"); lampcard.setFixedHeight(48)
+        lh = QHBoxLayout(lampcard); lh.setContentsMargins(18, 0, 18, 0); lh.setSpacing(22)
+        self.lamp_out = Lamp("OUTPUT"); self.cvcc = CVCCIndicator()
         self.lamp_ovp = Lamp("OVP"); self.lamp_ocp = Lamp("OCP")
-        for L in (self.lamp_out, self.lamp_cv, self.lamp_cc, self.lamp_ovp, self.lamp_ocp):
-            lamps.addWidget(L)
-        gv.addLayout(lamps)
-        mid.addWidget(gc)
-        mid.addWidget(self._charts(), 1)
-        col.addLayout(mid, 1)
-
+        lh.addWidget(self.lamp_out); lh.addWidget(self.cvcc)
+        lh.addWidget(self.lamp_ovp); lh.addWidget(self.lamp_ocp)
+        lh.addStretch(1); col.addWidget(lampcard)
         stats = QHBoxLayout(); stats.setSpacing(14)
-        self.s_energy = self._readout("ENERGY", "", C["text"], small=True)
-        self.s_temp = self._readout("TEMP", "", C["text"], small=True)
-        self.s_time = self._readout("RUNTIME", "", C["text"], small=True)
-        self.s_set = self._readout("SETPOINT", "", C["muted"], small=True)
-        for s in (self.s_energy, self.s_temp, self.s_time, self.s_set):
-            s[0].setFixedHeight(72); stats.addWidget(s[0], 1)
+        self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = _readout("ENERGY", "Wh", C["text"])
+        self.temp_gauge = TempGauge(); self.r_time = _readout("RUNTIME", "", C["text"])
+        stats.addWidget(self.r_pow[0], 1); stats.addWidget(self.r_energy[0], 1)
+        stats.addWidget(self.temp_gauge, 1); stats.addWidget(self.r_time[0], 1)
         col.addLayout(stats)
         return col
 
-    def _readout(self, title, unit, color, small=False):
-        card = _card()
-        v = QVBoxLayout(card); v.setContentsMargins(16, 10, 16, 10); v.setSpacing(2)
-        v.addWidget(_lab(title, "cardTitle"))
-        row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        val = QLabel("—"); val.setFont(mono(16 if small else 38)); val.setStyleSheet(f"color:{color};")
-        row.addWidget(val)
-        if unit:
-            u = QLabel(unit); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
-        row.addStretch(1); v.addLayout(row)
-        return card, val
-
     def _charts(self):
         pg.setConfigOptions(antialias=True)
-        wrap = _card(); lay = QVBoxLayout(wrap); lay.setContentsMargins(8, 8, 8, 8)
+        wrap = QFrame(); wrap.setProperty("class", "card"); lay = QVBoxLayout(wrap); lay.setContentsMargins(8, 8, 8, 8)
         glw = pg.GraphicsLayoutWidget(); glw.setBackground(C["card"])
         self.p_v = glw.addPlot(row=0, col=0); self.p_i = glw.addPlot(row=1, col=0)
         for p, unit in ((self.p_v, "V"), (self.p_i, "A")):
@@ -397,49 +485,75 @@ class MainWindow(QWidget):
         self.p_i.setXLink(self.p_v); self.p_i.setLabel("bottom", "seconds", color=C["muted"])
         self.curve_v = self.p_v.plot(pen=pg.mkPen(C["volt"], width=2))
         self.curve_i = self.p_i.plot(pen=pg.mkPen(C["curr"], width=2))
-        lay.addWidget(glw)
-        return wrap
+        lay.addWidget(glw); return wrap
 
     # ---- worker
     def _start_worker(self):
         self.thread = QThread(); self.worker = DeviceWorker(self.backend, poll_ms=100)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)
-        self.worker.state.connect(self._on_state)
-        self.worker.connected.connect(self._on_connected)
-        self.worker.disconnected.connect(self._on_disconnected)
-        self.worker.error.connect(self._on_error)
-        self.reqConnect.connect(self.worker.connect_device)
-        self.reqDisconnect.connect(self.worker.disconnect_device)
-        self.reqV.connect(self.worker.set_voltage)
-        self.reqA.connect(self.worker.set_current)
+        self.worker.state.connect(self._on_state); self.worker.connected.connect(self._on_connected)
+        self.worker.disconnected.connect(self._on_disconnected); self.worker.error.connect(self._on_error)
+        self.reqConnect.connect(self.worker.connect_device); self.reqDisconnect.connect(self.worker.disconnect_device)
+        self.reqV.connect(self.worker.set_voltage); self.reqA.connect(self.worker.set_current)
         self.reqOut.connect(self.worker.set_output)
         self.thread.start()
 
+    # ---- helpers
     def _toggle_conn(self):
         (self.reqConnect if self.btn_conn.text() == "Connect" else self.reqDisconnect).emit()
 
     def _set_enabled(self, on):
-        for w in (self.toggle, self.sp_v, self.sp_a, self.btn_off):
+        for w in (self.out_btn, self.ch_v, self.ch_a, self.btn_off):
             w.setEnabled(on)
 
+    def _apply_preset(self, v, a):
+        self.ch_v.set_setpoint(v, emit=True); self.ch_a.set_setpoint(a, emit=True)
+        self._logline(f"preset {v:g}V / {a:g}A", C["accent"])
+
+    def _save_preset(self, chip):
+        chip.store(self.ch_v.value(), self.ch_a.value())
+        self._logline(f"saved preset {chip.v:g}V / {chip.a:g}A", C["accent"])
+
+    def _set_badge(self, text, hexcol):
+        rgb = _rgb(hexcol); self.badge.setText(text)
+        self.badge.setStyleSheet(f"background:rgba({rgb},0.16);color:{hexcol};border:1px solid rgba({rgb},0.5);"
+                                 f"border-radius:10px;padding:4px 12px;font-weight:800;letter-spacing:1px;")
+
+    def _set_status(self, text, hexcol, tint=True):
+        self.status.setText(text)
+        if tint:
+            rgb = _rgb(hexcol)
+            self.status.setStyleSheet(f"background:rgba({rgb},0.13);color:{hexcol};border:1px solid rgba({rgb},0.45);"
+                                      f"border-radius:11px;padding:5px 13px;font-weight:700;")
+        else:
+            self.status.setStyleSheet(f"background:{C['card']};color:{C['muted']};border:1px solid {C['stroke']};"
+                                      f"border-radius:11px;padding:5px 13px;font-weight:700;")
+
+    def _style_remote(self, held):
+        if held:
+            rgb = _rgb(C["accent"])
+            self.btn_remote.setStyleSheet(f"background:rgba({rgb},0.9);color:{C['panel']};border:none;"
+                                          f"border-radius:10px;padding:9px 16px;font-weight:700;")
+            self.btn_remote.setText("● Remote")
+        else:
+            self.btn_remote.setStyleSheet(""); self.btn_remote.setText("Remote")
+
     def _logline(self, msg, color):
-        ts = time.strftime("%H:%M:%S")
-        self.log.appendHtml(f'<span style="color:{C["muted"]}">{ts}</span> '
+        self.log.appendHtml(f'<span style="color:{C["muted"]}">{time.strftime("%H:%M:%S")}</span> '
                             f'<span style="color:{color}">{msg}</span>')
 
     # ---- callbacks
     def _on_connected(self, info):
-        self.status.setText("● Connected"); self.status.setStyleSheet(f"color:{C['on']};")
+        self._set_status("● Connected", C["on"])
         self.devlabel.setText(f"{info.get('model','MP305')}  ·  {info.get('fw','')}")
-        self.badge.setText(info.get("transport", "USB").upper().replace("SIMULATOR", "SIM"))
+        self._set_badge("SIM" if not self.is_real else "USB", C["warn"] if not self.is_real else C["on"])
         self.btn_conn.setText("Disconnect"); self._set_enabled(True); self._init_sp = False
         self._logline(f"connected — {info.get('model','MP305')} {info.get('fw','')}", C["on"])
 
     def _on_disconnected(self, _):
-        self.status.setText("Disconnected"); self.status.setStyleSheet(f"color:{C['muted']};")
-        self.btn_conn.setText("Connect"); self._set_enabled(False)
-        self._logline("disconnected", C["warn"])
+        self._set_status("○ Disconnected", C["muted"], tint=False)
+        self.btn_conn.setText("Connect"); self._set_enabled(False); self._logline("disconnected", C["warn"])
 
     def _on_error(self, msg):
         self._logline(f"error: {msg}", C["danger"])
@@ -448,36 +562,24 @@ class MainWindow(QWidget):
         on = bool(st["output"]); cc = st.get("mode") == "CC"
         self._sync = True
         if not self._init_sp:
-            self.sp_v.set_value(st["set_voltage"]); self.sp_a.set_value(st["set_current"])
-            self._init_sp = True
-        if self.toggle.isChecked() != on:
-            self.toggle.setChecked(on)
-            self._logline(f"output {'ON' if on else 'OFF'}", C["on"] if on else C["muted"])
+            self.ch_v.set_setpoint(st["set_voltage"]); self.ch_a.set_setpoint(st["set_current"]); self._init_sp = True
+        if self.out_btn.isChecked() != on:
+            self.out_btn.setChecked(on); self._logline(f"output {'ON' if on else 'OFF'}", C["on"] if on else C["muted"])
         self._sync = False
 
-        self.card_v[1].setText(f"{st['voltage']:.2f}")
-        self.card_a[1].setText(f"{st['current']:.3f}")
-        self.card_w[1].setText(f"{st['power']:.2f}")
-        self.out_state.setText("ON" if on else "OFF")
-        self.out_state.setStyleSheet(f"color:{C['on'] if on else C['off']};")
+        self.ch_v.set_measured(st["voltage"]); self.ch_a.set_measured(st["current"])
+        self.ch_v.set_active(on and not cc, "CV"); self.ch_a.set_active(on and cc, "CC")
 
-        self.gauge_v.set(st["voltage"] / 30.0, f"{st['voltage']:.2f}",
-                         "CV" if on else "", active=(on and not cc))
-        seta = max(1e-6, st["set_current"])
-        self.gauge_a.set(st["current"] / seta, f"{st['current']:.3f}",
-                         "CC" if on else "", active=(on and cc))
+        self.r_pow[1].setText(f"{st['power']:.2f}"); self.r_energy[1].setText(f"{st['energy']:.3f}")
+        self.temp_gauge.set(st["temperature"])
+        self.batt.set(st.get("battery"), st.get("charging", False))
+        h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
+        self.r_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
 
         self.lamp_out.set(on, C["on"])
-        self.lamp_cv.set(on and not cc, C["on"]); self.lamp_cc.set(on and cc, C["warn"])
+        self.cvcc.set_mode(("CC" if cc else "CV") if on else None)
         errs = st.get("errors", [])
-        self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"])
-        self.lamp_ocp.set("errorDcOutOCP" in errs, C["danger"])
-
-        self.s_energy[1].setText(f"{st['energy']:.3f} Wh")
-        self.s_temp[1].setText(f"{st['temperature']} °C")
-        h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
-        self.s_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
-        self.s_set[1].setText(f"{st['set_voltage']:.2f}V / {st['set_current']:.3f}A")
+        self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"]); self.lamp_ocp.set("errorDcOutOCP" in errs, C["danger"])
 
         t = time.monotonic() - self._t0
         self._t.append(t); self._v.append(st["voltage"]); self._i.append(st["current"])

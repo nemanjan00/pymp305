@@ -23,6 +23,8 @@ def _state_to_dict(st, info_name=None) -> dict:
         "set_voltage": st.set_voltage, "set_current": st.set_current,
         "output": int(st.output), "model": st.model, "temperature": st.temperature,
         "energy": st.energy, "working_time": st.working_time,
+        "battery": st.percentage, "battery_state": st.battery_state,
+        "charging": st.battery_state == 1,
         "errors": list(getattr(st, "errors", []) or []),
         "mode": "CC" if cc else "CV",
     }
@@ -69,9 +71,15 @@ class SimBackend:
         self.load = load_ohms
         self.temp = 25.0
         self.energy_wh = 0.0
+        self.batt = 86.0
+        self.charging = True
         self._t0 = time.monotonic()
         self._last = self._t0
         self._n = 0
+
+    def toggle_charging(self):
+        self.charging = not self.charging
+        return self.charging
 
     def connect(self) -> dict:
         self._t0 = self._last = time.monotonic()
@@ -97,11 +105,14 @@ class SimBackend:
         self.energy_wh += power * dt / 3600.0
         target_temp = 25.0 + power * 1.4
         self.temp += (target_temp - self.temp) * min(1.0, dt * 0.5)
+        self.batt = max(0.0, min(100.0, self.batt + (1.5 if self.charging else -1.5) * dt))
         return {
             "voltage": round(voltage, 2), "current": round(current, 3), "power": round(power, 2),
             "set_voltage": self.set_v, "set_current": self.set_a,
             "output": int(self.on), "model": 0, "temperature": round(self.temp),
             "energy": round(self.energy_wh, 3), "working_time": int(now - self._t0),
+            "battery": int(round(self.batt)), "battery_state": 1 if self.charging else 0,
+            "charging": self.charging,
             "errors": [], "mode": "CC" if (self.on and cc) else "CV",
         }
 
