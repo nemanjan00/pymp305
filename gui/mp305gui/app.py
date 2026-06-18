@@ -82,29 +82,31 @@ class Lamp(QWidget):
 
 
 class CVCCIndicator(QWidget):
-    """Segmented [ CV | CC ] indicator — the active (limiting) mode lights up; both dim when
-    the output is off. It's a status display, not a control (the device decides CV vs CC)."""
+    """Segmented [ CV | CC ] button-group (Bootstrap style): joined cells, rounded outer
+    corners, the active (limiting) mode filled solid. Status display, not a control."""
     def __init__(self):
-        super().__init__(); self.setFixedSize(150, 52); self._mode = None
+        super().__init__(); self.setFixedSize(124, 40); self._mode = None
 
     def set_mode(self, mode):   # "CV" | "CC" | None
         self._mode = mode; self.update()
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-        p.setPen(QPen(QColor(C["stroke"]), 1)); p.setBrush(QColor(C["bg"]))
-        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 10, 10)
-        f = QFont(); f.setPointSize(15); f.setBold(True); p.setFont(f)
+        w, h = self.width(), self.height(); r = 9; cw = w / 2
+        outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
+        f = QFont(); f.setPointSize(14); f.setBold(True); p.setFont(f)
         for i, (label, col) in enumerate((("CV", C["on"]), ("CC", C["warn"]))):
-            cw = w / 2; x = i * cw; cell = QRectF(x, 0, cw, h)
-            if self._mode == label:
-                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col))
-                p.drawRoundedRect(QRectF(x + 3, 3, cw - 6, h - 6), 8, 8)
-                p.setPen(QColor(C["panel"]))
+            x = i * cw
+            if self._mode == label:                  # fill this half (outer corner rounded)
+                p.save(); p.setClipRect(QRectF(x, 0, cw, h))
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
+                p.restore(); p.setPen(QColor(C["panel"]))
             else:
                 p.setPen(QColor(C["muted"]))
-            p.drawText(cell, Qt.AlignmentFlag.AlignCenter, label)
+            p.drawText(QRectF(x, 0, cw, h), Qt.AlignmentFlag.AlignCenter, label)
+        p.setPen(QPen(QColor(C["stroke"]), 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(outer, r, r)
+        p.drawLine(QPointF(cw, 5), QPointF(cw, h - 5))
 
 
 class BatteryWidget(QWidget):
@@ -430,7 +432,7 @@ class MainWindow(QWidget):
             self.ch_load.changed.connect(self.backend.set_load)
             v.addWidget(self.ch_load)
 
-        pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(74)
+        pc = QFrame(); pc.setProperty("class", "card"); pc.setFixedHeight(92)
         pv = QVBoxLayout(pc); pv.setContentsMargins(16, 10, 16, 12); pv.setSpacing(8)
         pv.addWidget(_lab("PRESETS  (right-click saves)", "cardTitle"))
         prow = QHBoxLayout(); prow.setSpacing(6)
@@ -456,20 +458,42 @@ class MainWindow(QWidget):
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
         col.addWidget(self._charts(), 1)
-        lampcard = QFrame(); lampcard.setProperty("class", "card"); lampcard.setFixedHeight(48)
-        lh = QHBoxLayout(lampcard); lh.setContentsMargins(18, 0, 18, 0); lh.setSpacing(22)
-        self.lamp_out = Lamp("OUTPUT"); self.cvcc = CVCCIndicator()
+        lampcard = QFrame(); lampcard.setProperty("class", "card"); lampcard.setFixedHeight(60)
+        lh = QHBoxLayout(lampcard); lh.setContentsMargins(18, 0, 18, 0); lh.setSpacing(18)
+        self.cvcc = CVCCIndicator()
         self.lamp_ovp = Lamp("OVP"); self.lamp_ocp = Lamp("OCP")
-        lh.addWidget(self.lamp_out); lh.addWidget(self.cvcc)
+        lh.addStretch(1); lh.addWidget(self.cvcc); lh.addStretch(1)   # CV|CC centered
         lh.addWidget(self.lamp_ovp); lh.addWidget(self.lamp_ocp)
-        lh.addStretch(1); col.addWidget(lampcard)
+        col.addWidget(lampcard)
         stats = QHBoxLayout(); stats.setSpacing(14)
-        self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = _readout("ENERGY", "Wh", C["text"])
+        self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = self._energy_card()
         self.temp_gauge = TempGauge(); self.r_time = _readout("RUNTIME", "", C["text"])
         stats.addWidget(self.r_pow[0], 1); stats.addWidget(self.r_energy[0], 1)
         stats.addWidget(self.temp_gauge, 1); stats.addWidget(self.r_time[0], 1)
         col.addLayout(stats)
         return col
+
+    def _energy_card(self):
+        ec = QFrame(); ec.setProperty("class", "card"); ec.setFixedHeight(72)
+        v = QVBoxLayout(ec); v.setContentsMargins(16, 8, 12, 10); v.setSpacing(2)
+        tr = QHBoxLayout(); tr.addWidget(_lab("ENERGY", "cardTitle")); tr.addStretch(1)
+        btn = QPushButton("↻"); btn.setFixedSize(26, 22); btn.setToolTip("Reset energy")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"padding:0;font-weight:800;border-radius:6px;background:{C['card_hi']};"
+                          f"border:1px solid {C['stroke']};")
+        btn.clicked.connect(self._reset_energy); tr.addWidget(btn)
+        v.addLayout(tr)
+        row = QHBoxLayout(); row.setSpacing(6); row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        val = QLabel("—"); val.setFont(mono(17)); val.setStyleSheet(f"color:{C['text']};")
+        row.addWidget(val)
+        u = QLabel("Wh"); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
+        row.addStretch(1); v.addLayout(row)
+        return ec, val
+
+    def _reset_energy(self):
+        fn = getattr(self.backend, "reset_energy", None)
+        if fn is not None:
+            fn(); self._logline("energy reset", C["accent"])
 
     def _charts(self):
         pg.setConfigOptions(antialias=True)
@@ -516,19 +540,16 @@ class MainWindow(QWidget):
         self._logline(f"saved preset {chip.v:g}V / {chip.a:g}A", C["accent"])
 
     def _set_badge(self, text, hexcol):
+        # small SQUARE tag — reads as a badge, not a button
         rgb = _rgb(hexcol); self.badge.setText(text)
-        self.badge.setStyleSheet(f"background:rgba({rgb},0.16);color:{hexcol};border:1px solid rgba({rgb},0.5);"
-                                 f"border-radius:10px;padding:4px 12px;font-weight:800;letter-spacing:1px;")
+        self.badge.setStyleSheet(f"background:rgba({rgb},0.18);color:{hexcol};border:1px solid rgba({rgb},0.55);"
+                                 f"border-radius:5px;padding:2px 7px;font-size:11px;font-weight:800;letter-spacing:1px;")
 
     def _set_status(self, text, hexcol, tint=True):
+        # flat dot + text (no box) — clearly a status indicator, not a clickable button
         self.status.setText(text)
-        if tint:
-            rgb = _rgb(hexcol)
-            self.status.setStyleSheet(f"background:rgba({rgb},0.13);color:{hexcol};border:1px solid rgba({rgb},0.45);"
-                                      f"border-radius:11px;padding:5px 13px;font-weight:700;")
-        else:
-            self.status.setStyleSheet(f"background:{C['card']};color:{C['muted']};border:1px solid {C['stroke']};"
-                                      f"border-radius:11px;padding:5px 13px;font-weight:700;")
+        self.status.setStyleSheet(f"background:transparent;border:none;color:{hexcol};"
+                                  f"font-weight:700;padding:0 4px;")
 
     def _style_remote(self, held):
         if held:
@@ -576,7 +597,6 @@ class MainWindow(QWidget):
         h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
         self.r_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-        self.lamp_out.set(on, C["on"])
         self.cvcc.set_mode(("CC" if cc else "CV") if on else None)
         errs = st.get("errors", [])
         self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"]); self.lamp_ocp.set("errorDcOutOCP" in errs, C["danger"])

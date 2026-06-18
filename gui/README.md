@@ -3,7 +3,7 @@
 A modern **Dracula-themed** desktop dashboard for the ISDT MP305, built on
 [`pymp305`](../python) with **PyQt6** + **pyqtgraph**.
 
-![screenshot](./screenshot.png)
+![screenshot](./dashboard.png)
 
 Designed for a **trackball-only lab PC — no keyboard, and no accidental changes.** Every
 action is a deliberate pointer click on a large target; nothing alters the output by a

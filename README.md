@@ -148,11 +148,13 @@ see the banner.**
 
 ## Desktop GUI
 
-A Dracula-themed PyQt6 dashboard in [`gui/`](./gui) — live V/I/W readouts, a CV/CC gauge,
-output toggle, set-point controls, and rolling charts. Runs against a real MP305 or a
-built-in simulator (the shot below is the simulator driving a CV→CC transition).
+A Dracula-themed PyQt6 dashboard in [`gui/`](./gui), designed for a **trackball-only**
+lab PC (no keyboard, no accidental changes): per-channel instrument cards (measured + tap-to-set
+keypad), a centered **CV|CC** indicator, a big output card-button, battery + temperature, and
+rolling V/I charts. Runs against a real MP305 or a built-in simulator (the shot is the
+simulator driving a CV→CC transition).
 
-![GUI screenshot](./gui/screenshot.png)
+![GUI screenshot](./gui/dashboard.png)
 
 ```bash
 cd gui && pip install -r requirements.txt && python run.py --demo

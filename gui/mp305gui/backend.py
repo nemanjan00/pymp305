@@ -51,6 +51,9 @@ class RealBackend:
     def apply(self, v=None, a=None, on=None):
         self._psu.set_output(voltage=v, current=a, on=on)
 
+    def reset_energy(self):
+        pass   # no device command mapped for the energy/time reset yet
+
     def close(self):
         try:
             if self._psu:
@@ -80,6 +83,9 @@ class SimBackend:
     def toggle_charging(self):
         self.charging = not self.charging
         return self.charging
+
+    def reset_energy(self):
+        self.energy_wh = 0.0
 
     def connect(self) -> dict:
         self._t0 = self._last = time.monotonic()
