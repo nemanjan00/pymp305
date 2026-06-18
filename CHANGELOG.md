@@ -4,6 +4,13 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.5.3
+
+### Fixed
+- **GUI**: the over-current `CC | OCP` toggle ballooned on tall / 4K displays (it absorbed the
+  column's slack to match the right column). It's now fixed-height like the other cards; the
+  left column simply ends naturally (columns need not be equal height).
+
 ## 0.5.2
 
 ### Fixed

@@ -131,8 +131,8 @@ class SegToggle(QWidget):
 
     def __init__(self, cells):                       # cells = [(code, description, color), ...]
         super().__init__(); self._cells = cells; self._idx = 0
-        self.setMinimumHeight(58)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setFixedHeight(66)        # fixed like the other cards (don't absorb column slack)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(110 * len(cells))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pos = 0.0                       # animated fill position (float cell index)
@@ -680,8 +680,8 @@ class MainWindow(QWidget):
         self.cov = SegToggle([("CC", "Constant Current", C["warn"]),
                               ("OCP", "Overcurrent Protection", C["danger"])])
         self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
-        ov.addWidget(self.cov, 1)
-        v.addWidget(oc, 1)
+        ov.addWidget(self.cov)
+        v.addWidget(oc)
 
         if isinstance(self.backend, SimBackend):
             self.ch_load = ChannelCard("SIM LOAD", "Ω", 100.0, C["pink"], 0, measured=False)
@@ -703,6 +703,7 @@ class MainWindow(QWidget):
             b.set_group_style(i, n)
             gl.addWidget(b, 1)
         pv.addWidget(grp); v.addWidget(pc)
+        v.addStretch(1)        # controls keep natural height; extra space falls to the bottom
         return page
 
     def _charge_page(self):
