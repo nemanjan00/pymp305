@@ -31,7 +31,9 @@ python run.py --demo     # force the simulator
 - **Keypad** — tap any channel to open an on-screen pad with **digit + unit** buttons
   (`9`→`V`, `1500`→`mA`); exact entry, no keyboard.
 - **Presets** — one-click V+I rails; **right-click a preset to save** the current setpoint.
-- **CV | CC** segmented indicator + **OUTPUT / OVP / OCP** lamps.
+- **Over-current toggle** `CC | OCP` — a real *control* (sets the device's `currentOver`:
+  CC = current-limit, OCP = trip the output). Distinct from the **CV / CC / OVP status lamps**
+  (CV/CC come from the device's regulation status); the OCP cell doubles as its trip lamp.
 - **Battery** (internal cell) — %, charging bolt, colour by level, **pulsing red near-empty**;
   click to toggle charge/discharge (sim).
 - **Temperature** bar gauge, **Power**, **Energy**, **Runtime**.

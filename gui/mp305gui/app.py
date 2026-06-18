@@ -81,15 +81,25 @@ class Lamp(QWidget):
         p.drawText(self.rect().adjusted(20, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, self._label)
 
 
-class SegIndicator(QWidget):
-    """Bootstrap-style segmented status group: joined cells, rounded outer corners. Each
-    cell lights independently (it's a status display, not a mutually-exclusive control)."""
-    def __init__(self, cells):                       # cells = [(label, color), ...]
-        super().__init__(); self._cells = cells; self._active = set()
-        self.setFixedSize(62 * len(cells), 40)
+class SegToggle(QWidget):
+    """A real mutually-exclusive segmented toggle (Bootstrap-style joined cells). Click a
+    cell to select it. Used for the over-current behavior: CC (current-limit) | OCP (trip).
+    Faithful to WebLink's `connectSets.currentOver` (0=CC, 1=OCP)."""
+    selected = pyqtSignal(int)
 
-    def set_active(self, active):
-        self._active = set(active); self.update()
+    def __init__(self, cells):                       # cells = [(label, color), ...]
+        super().__init__(); self._cells = cells; self._idx = 0
+        self.setFixedSize(70 * len(cells), 40)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_index(self, i):
+        self._idx = max(0, min(len(self._cells) - 1, int(i))); self.update()
+
+    def mousePressEvent(self, e):
+        i = int(e.position().x() // (self.width() / len(self._cells)))
+        i = max(0, min(len(self._cells) - 1, i))
+        if i != self._idx:
+            self._idx = i; self.update(); self.selected.emit(i)
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -98,7 +108,7 @@ class SegIndicator(QWidget):
         f = QFont(); f.setPointSize(14); f.setBold(True); p.setFont(f)
         for i, (label, col) in enumerate(self._cells):
             x = i * cw
-            if label in self._active:
+            if i == self._idx:
                 p.save(); p.setClipRect(QRectF(x, 0, cw, h))
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
                 p.restore(); p.setPen(QColor(C["panel"]))
@@ -369,6 +379,7 @@ def _readout(title, unit, color):
 class MainWindow(QWidget):
     reqConnect = pyqtSignal(); reqDisconnect = pyqtSignal()
     reqV = pyqtSignal(float); reqA = pyqtSignal(float); reqOut = pyqtSignal(bool)
+    reqCurrentOver = pyqtSignal(int)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -460,10 +471,19 @@ class MainWindow(QWidget):
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
         col.addWidget(self._charts(), 1)
-        strip = QHBoxLayout(); strip.setContentsMargins(2, 0, 2, 0); strip.setSpacing(16)
-        self.seg = SegIndicator([("CC", C["warn"]), ("OCP", C["danger"])])   # standalone, no card
-        self.lamp_ovp = Lamp("OVP")
-        strip.addWidget(self.seg); strip.addWidget(self.lamp_ovp); strip.addStretch(1)
+        # over-current behaviour is a SELECTABLE setting → toggle (CC = current-limit, OCP =
+        # trip). CV/CC regulation status + OVP trip are read-only → lamps. The OCP trip
+        # overlaps the toggle, so the toggle's OCP cell doubles as that indicator.
+        strip = QHBoxLayout(); strip.setContentsMargins(4, 0, 4, 0); strip.setSpacing(16)
+        strip.addWidget(_lab("OVER-CURRENT", "cardTitle"))
+        self.cov = SegToggle([("CC", C["warn"]), ("OCP", C["danger"])])
+        self.cov.selected.connect(lambda i: None if self._sync else self.reqCurrentOver.emit(i))
+        strip.addWidget(self.cov)
+        strip.addSpacing(26)
+        self.lamp_cv = Lamp("CV"); self.lamp_cc = Lamp("CC"); self.lamp_ovp = Lamp("OVP")
+        for L in (self.lamp_cv, self.lamp_cc, self.lamp_ovp):
+            strip.addWidget(L)
+        strip.addStretch(1)
         col.addLayout(strip)
         stats = QHBoxLayout(); stats.setSpacing(14)
         self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = self._energy_card()
@@ -520,7 +540,7 @@ class MainWindow(QWidget):
         self.worker.disconnected.connect(self._on_disconnected); self.worker.error.connect(self._on_error)
         self.reqConnect.connect(self.worker.connect_device); self.reqDisconnect.connect(self.worker.disconnect_device)
         self.reqV.connect(self.worker.set_voltage); self.reqA.connect(self.worker.set_current)
-        self.reqOut.connect(self.worker.set_output)
+        self.reqOut.connect(self.worker.set_output); self.reqCurrentOver.connect(self.worker.set_current_over)
         self.thread.start()
 
     # ---- helpers
@@ -580,7 +600,7 @@ class MainWindow(QWidget):
         self._logline(f"error: {msg}", C["danger"])
 
     def _on_state(self, st):
-        on = bool(st["output"]); cc = st.get("mode") == "CC"
+        on = bool(st["output"])
         self._sync = True
         if not self._init_sp:
             self.ch_v.set_setpoint(st["set_voltage"]); self.ch_a.set_setpoint(st["set_current"]); self._init_sp = True
@@ -588,8 +608,15 @@ class MainWindow(QWidget):
             self.out_btn.setChecked(on); self._logline(f"output {'ON' if on else 'OFF'}", C["on"] if on else C["muted"])
         self._sync = False
 
+        # CV/CC is the device's regulation status (out_state: 2=CV, 1=CC) — read-only
+        out_state = st.get("out_state", 0)
+        is_cv, is_cc = out_state == 2, out_state == 1
         self.ch_v.set_measured(st["voltage"]); self.ch_a.set_measured(st["current"])
-        self.ch_v.set_active(on and not cc, "CV"); self.ch_a.set_active(on and cc, "CC")
+        self.ch_v.set_active(is_cv, "CV"); self.ch_a.set_active(is_cc, "CC")
+        self._sync = True
+        self.cov.set_index(st.get("current_over", 0))   # the over-current toggle (selectable)
+        self._sync = False
+        self.lamp_cv.set(is_cv, C["on"]); self.lamp_cc.set(is_cc, C["warn"])
 
         self.r_pow[1].setText(f"{st['power']:.2f}"); self.r_energy[1].setText(f"{st['energy']:.3f}")
         self.temp_gauge.set(st["temperature"])
@@ -597,14 +624,7 @@ class MainWindow(QWidget):
         h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
         self.r_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-        errs = st.get("errors", [])
-        active = set()
-        if on and cc:
-            active.add("CC")
-        if "errorDcOutOCP" in errs:
-            active.add("OCP")
-        self.seg.set_active(active)
-        self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"])
+        self.lamp_ovp.set("errorDcOutOVP" in st.get("errors", []), C["danger"])
 
         t = time.monotonic() - self._t0
         self._t.append(t); self._v.append(st["voltage"]); self._i.append(st["current"])

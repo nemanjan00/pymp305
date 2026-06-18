@@ -68,6 +68,16 @@ class DeviceWorker(QObject):
     def set_output(self, on: bool):
         self._apply(on=on)
 
+    @pyqtSlot(int)
+    def set_current_over(self, mode: int):
+        if self._live:
+            fn = getattr(self.backend, "set_current_over", None)
+            if fn is not None:
+                try:
+                    fn(mode)
+                except Exception as e:  # noqa: BLE001
+                    self.error.emit(str(e))
+
     def _apply(self, **kw):
         if not self._live:
             return

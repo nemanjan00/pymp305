@@ -4,6 +4,15 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.3
+
+### Changed
+- **GUI** (`gui/`): correct the control-vs-status semantics by replicating WebLink's logic —
+  **over-current** `CC | OCP` is now a real selectable toggle (sets `currentOver`:
+  current-limit vs trip), while **CV / CC / OVP** are read-only status lamps driven by the
+  device's `outState`. The simulator models the OCP trip. Also: flat SIM/USB label, energy
+  reset button, presets/CV-CC clipping fixes.
+
 ## 0.4.2
 
 ### Changed
