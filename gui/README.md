@@ -57,6 +57,9 @@ toggle charge/discharge in sim), SIM/USB, model/fw, connection status, **Remote*
 remote control — releasing hands the knob back to the front panel and disables the on-screen
 controls, exactly like the device's `remoteCon` lockout), Connect/Disconnect.
 
+**Motion**: read-outs, the temperature gauge, and the OUTPUT / CC·OCP toggles all ease
+(~180 ms, OutCubic) instead of snapping; an OCP trip briefly flashes the over-current toggle red.
+
 Tap any value to open the on-screen keypad — digits **and** unit buttons, exact entry, no keyboard:
 
 ![keypad over the dashboard](./dashboard-keypad.png)

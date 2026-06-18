@@ -15,8 +15,10 @@ import time
 from collections import deque
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRectF, QTimer, QPointF
-from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF
+from PyQt6.QtCore import (
+    Qt, QThread, pyqtSignal, QRectF, QTimer, QPointF, QObject, QVariantAnimation, QEasingCurve,
+)
+from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
     QGridLayout, QDialog, QPlainTextEdit, QSizePolicy,
@@ -44,6 +46,35 @@ def _rgb(hexcol):
     c = QColor(hexcol); return f"{c.red()},{c.green()},{c.blue()}"
 
 
+def _blend(a, b, t):
+    """Linear color interpolation a→b for t in [0,1]."""
+    ca, cb = QColor(a), QColor(b); t = max(0.0, min(1.0, t))
+    return QColor(int(ca.red() + (cb.red() - ca.red()) * t),
+                  int(ca.green() + (cb.green() - ca.green()) * t),
+                  int(ca.blue() + (cb.blue() - ca.blue()) * t))
+
+
+class EasedValue(QObject):
+    """Eases a float toward a target (OutCubic, ~180 ms) and pushes each step to a setter,
+    so numeric read-outs and gauges glide instead of snapping."""
+    def __init__(self, setter, dur=180, parent=None):
+        super().__init__(parent)
+        self._setter = setter; self._cur = 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(dur); self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(self._step)
+
+    def _step(self, v):
+        self._cur = float(v); self._setter(self._cur)
+
+    def to(self, target):
+        target = float(target)
+        if abs(target - self._cur) < 1e-6:
+            return
+        self._anim.stop(); self._anim.setStartValue(self._cur)
+        self._anim.setEndValue(target); self._anim.start()
+
+
 # ---------------------------------------------------------------- widgets
 class OutputButton(QPushButton):
     """The whole OUTPUT card is one button — green ON, red OFF. Huge trackball target."""
@@ -51,11 +82,20 @@ class OutputButton(QPushButton):
         super().__init__()
         self.setCheckable(True); self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(92)
-        self.toggled.connect(self._restyle); self._restyle(False)
+        self._mix = 0.0                       # 0 = OFF (red), 1 = ON (green)
+        self._anim = QVariantAnimation(self); self._anim.setDuration(200)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(lambda v: self._restyle(float(v)))
+        self.toggled.connect(self._on_toggled); self._restyle(0.0)
 
-    def _restyle(self, on):
-        col = C["on"] if on else C["danger"]; rgb = _rgb(col)
+    def _on_toggled(self, on):
         self.setText("⏻   OUTPUT ON" if on else "⏻   OUTPUT OFF")
+        self._anim.stop(); self._anim.setStartValue(self._mix)
+        self._anim.setEndValue(1.0 if on else 0.0); self._anim.start()
+
+    def _restyle(self, mix):
+        self._mix = mix
+        col = _blend(C["danger"], C["on"], mix).name(); rgb = _rgb(col)
         self.setStyleSheet(
             f"QPushButton{{background:rgba({rgb},0.15);color:{col};border:2px solid {col};"
             f"border-radius:14px;font-size:23px;font-weight:800;letter-spacing:2px;}}"
@@ -93,41 +133,65 @@ class SegToggle(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumWidth(110 * len(cells))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pos = 0.0                       # animated fill position (float cell index)
+        self._slide = QVariantAnimation(self); self._slide.setDuration(180)
+        self._slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._slide.valueChanged.connect(lambda v: (setattr(self, "_pos", float(v)), self.update()))
+        self._pulse = 0.0                     # brief red flash (OCP trip)
+        self._pulse_anim = QVariantAnimation(self); self._pulse_anim.setDuration(480)
+        for k, val in ((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)):
+            self._pulse_anim.setKeyValueAt(k, val)
+        self._pulse_anim.valueChanged.connect(lambda v: (setattr(self, "_pulse", float(v)), self.update()))
+
+    def _glide_to(self, i):
+        self._slide.stop(); self._slide.setStartValue(self._pos)
+        self._slide.setEndValue(float(i)); self._slide.start()
 
     def set_index(self, i):
-        self._idx = max(0, min(len(self._cells) - 1, int(i))); self.update()
+        i = max(0, min(len(self._cells) - 1, int(i)))
+        if i != self._idx:
+            self._idx = i; self._glide_to(i)
+
+    def pulse(self):
+        self._pulse_anim.stop(); self._pulse_anim.start()
 
     def mousePressEvent(self, e):
         i = int(e.position().x() // (self.width() / len(self._cells)))
         i = max(0, min(len(self._cells) - 1, i))
         if i != self._idx:
-            self._idx = i; self.update(); self.selected.emit(i)
+            self._idx = i; self._glide_to(i); self.selected.emit(i)
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height(); r = 13; n = len(self._cells); cw = w / n   # card-shaped
         outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
+        # sliding fill: a cell-wide block at the animated position, clipped to the card shape,
+        # its colour blended between the cells it's travelling between
+        lo = max(0, min(n - 1, int(self._pos))); hi = min(n - 1, lo + 1)
+        fill = _blend(self._cells[lo][2], self._cells[hi][2], self._pos - lo)
+        p.save(); path = QPainterPath(); path.addRoundedRect(outer, r, r); p.setClipPath(path)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(fill); p.drawRect(QRectF(self._pos * cw, 0, cw, h))
+        p.restore()
         code_pt = int(max(14, min(26, h * 0.20)))    # scale the code with the cell height
         sub_pt = int(max(8, min(10, h * 0.075)))      # cap: the descriptions are long, must not clip
         fcode = QFont(); fcode.setPointSize(code_pt); fcode.setBold(True)
         fsub = QFont(); fsub.setPointSize(sub_pt); fsub.setBold(True)
-        mid = h / 2
+        mid = h / 2; lit = round(self._pos)
         for i, (code, sub, col) in enumerate(self._cells):
-            x = i * cw; active = i == self._idx
-            if active:
-                p.save(); p.setClipRect(QRectF(x, 0, cw, h))
-                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
-                p.restore()
-            code_col = QColor(C["panel"]) if active else QColor(C["muted"])
-            sub_col = QColor(C["panel"]) if active else QColor(C["muted"])
-            p.setFont(fcode); p.setPen(code_col)
+            x = i * cw
+            tcol = QColor(C["panel"]) if i == lit else QColor(C["muted"])
+            p.setFont(fcode); p.setPen(tcol)
             p.drawText(QRectF(x, mid - h * 0.30, cw, h * 0.32), Qt.AlignmentFlag.AlignCenter, code)
-            p.setFont(fsub); p.setPen(sub_col)
+            p.setFont(fsub); p.setPen(tcol)
             p.drawText(QRectF(x + 3, mid + h * 0.02, cw - 6, h * 0.26), Qt.AlignmentFlag.AlignCenter, sub)
         p.setPen(QPen(QColor(C["stroke"]), 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(outer, r, r)
         for i in range(1, n):
             p.drawLine(QPointF(i * cw, 5), QPointF(i * cw, h - 5))
+        if self._pulse > 0:                   # OCP trip flash
+            pc = QColor(C["danger"]); pc.setAlpha(int(220 * self._pulse))
+            p.setPen(QPen(pc, 3)); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(outer, r, r)
 
 
 class BatteryWidget(QWidget):
@@ -211,11 +275,15 @@ class TempGauge(QFrame):
         u = QLabel("°C"); u.setProperty("class", "unit"); row.addWidget(u, 0, Qt.AlignmentFlag.AlignBottom)
         row.addStretch(1); v.addLayout(row)
         self.bar = _TempBar(); v.addWidget(self.bar)
+        self._eased = EasedValue(self._render)
+
+    def _render(self, t):
+        col = C["on"] if t < 50 else C["warn"] if t < 65 else C["danger"]
+        self.val.setText(f"{t:.0f}"); self.val.setStyleSheet(f"color:{col};")
+        self.bar.set(t / self._max, col)
 
     def set(self, t):
-        col = C["on"] if t < 50 else C["warn"] if t < 65 else C["danger"]
-        self.val.setText(f"{t}"); self.val.setStyleSheet(f"color:{col};")
-        self.bar.set(t / self._max, col)
+        self._eased.to(float(t))
 
 
 class Keypad(QDialog):
@@ -315,6 +383,7 @@ class ChannelCard(QFrame):
             mrow.addWidget(self.meas)
             mu = QLabel(unit); mu.setProperty("class", "unit"); mrow.addWidget(mu, 0, Qt.AlignmentFlag.AlignBottom)
             mrow.addStretch(1); v.addLayout(mrow)
+            self._big = EasedValue(lambda val: self.meas.setText(f"{val:.{self._dec}f}"))
         srow = QHBoxLayout()
         self.setlab = QLabel(""); self.setlab.setFont(mono(34) if not measured else QFont())
         if not measured:
@@ -329,7 +398,7 @@ class ChannelCard(QFrame):
         if self._measured:
             self._meas_val = val
             if self._out_on:
-                self.meas.setText(f"{val:.{self._dec}f}")
+                self._big.to(val)
 
     def set_live(self, on):
         if self._measured and on != self._out_on:
@@ -342,10 +411,10 @@ class ChannelCard(QFrame):
         if not self._measured:
             return
         if self._out_on:
-            self.meas.setText(f"{self._meas_val:.{self._dec}f}")
+            self._big.to(self._meas_val)
             self.setlab.setText(f"SET  {self._set:.{self._dec}f} {self._unit}")
         else:
-            self.meas.setText(f"{self._set:.{self._dec}f}")
+            self._big.to(self._set)
             self.setlab.setText("output off")
             self.tag.setText("SET"); self.tag.setStyleSheet(f"color:{C['muted']};font-weight:800;letter-spacing:1px;")
         self.meas.setStyleSheet(f"color:{self._color};")
@@ -461,12 +530,14 @@ class MainWindow(QWidget):
         self.setObjectName("root")
         self.setWindowTitle("MP305 — ISDT bench supply")
         self.resize(1180, 860)
+        self.setMinimumSize(1060, 800)        # floor: stops anyone cramping it into nonsense
         self._sync = False; self._init_sp = False; self._last_errors = set()
         self._connected = False; self._remote_held = True
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
         self.backend, self.is_real = make_backend(prefer_real)
         self._build_ui(); self._start_worker()
+        self._pow_eased = EasedValue(lambda v: self.r_pow[1].setText(f"{v:.2f}"))
         self.batt.clicked.connect(self._toggle_charge)
         self.reqConnect.emit()
 
@@ -498,7 +569,7 @@ class MainWindow(QWidget):
         self.btn_remote.toggled.connect(self._on_remote_toggle); self._style_remote(True)
         self.btn_conn = QPushButton("Connect"); self.btn_conn.setObjectName("primary")
         self.btn_conn.clicked.connect(self._toggle_conn)
-        self.batt = BatteryWidget(); self.batt.setToolTip("Internal cell")
+        self.batt = BatteryWidget(); self.batt.setToolTip("Internal cell — click to start / stop charging")
         for w in (self.batt, self.badge, self.devlabel, self.status, self.btn_remote, self.btn_conn):
             h.addWidget(w)
         return bar
@@ -730,7 +801,7 @@ class MainWindow(QWidget):
         self.cov.set_index(st.get("current_over", 0))   # the over-current toggle (selectable)
         self._sync = False
 
-        self.r_pow[1].setText(f"{st['power']:.2f}"); self.r_energy[1].setText(f"{st['energy']:.3f}")
+        self._pow_eased.to(st["power"]); self.r_energy[1].setText(f"{st['energy']:.3f}")
         self.temp_gauge.set(st["temperature"])
         self.batt.set(st.get("battery"), st.get("charging", False))
         h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
@@ -742,6 +813,8 @@ class MainWindow(QWidget):
                   "errorDcOutOCP": "OVER-CURRENT PROTECTION tripped"}
         for e in errs - self._last_errors:
             self._logline(f"⚠ {labels.get(e, e)}", C["danger"])
+            if e == "errorDcOutOCP":
+                self.cov.pulse()              # brief red flash on the over-current toggle
         self._last_errors = errs
 
         t = time.monotonic() - self._t0

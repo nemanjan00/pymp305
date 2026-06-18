@@ -4,6 +4,18 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.8
+
+### Added
+- **GUI kinetic pass**: numeric read-outs (V/A/power), the temperature gauge, and the channel
+  set-point/measurement now **ease** to new values (~180 ms, OutCubic) instead of snapping; the
+  **OUTPUT** button cross-fades red↔green; the **CC | OCP** toggle's fill **slides** between
+  cells (colour-blended); an **OCP trip flashes the toggle red**.
+- A `setMinimumSize(1060×800)` floor so the window can't be crammed into nonsense.
+
+### Changed
+- Battery tooltip clarifies it's clickable to start/stop charging (sim).
+
 ## 0.4.7
 
 ### Changed
