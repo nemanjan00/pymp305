@@ -4,6 +4,15 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 
 > ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
 
+## 0.4.7
+
+### Changed
+- **GUI keypad — visible rail clamp**: entering a value above the channel max (e.g. 35 V on a
+  30 V rail) no longer clamps silently. The keypad snaps to the max, turns the display **red**
+  with a "capped to max … — tap a unit to accept" message, and requires a confirming tap, so an
+  over-the-rail entry can't slip through unnoticed. (The clamp itself, incl. unit conversion
+  like `50000 mV → 30 V`, was already enforced.)
+
 ## 0.4.6
 
 ### Changed

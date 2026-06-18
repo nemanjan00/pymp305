@@ -36,7 +36,8 @@ Left — controls:
   output is **off**, the card swaps to show the **set-point** as the big number (with a `SET`
   tag) so your configured V/A stays readable instead of a meaningless 0.
 - **Keypad** — tap a channel for an on-screen pad with **digit + unit** buttons
-  (`9`→`V`, `1500`→`mA`); exact entry, no keyboard.
+  (`9`→`V`, `1500`→`mA`); exact entry, no keyboard. Entries over the rail (e.g. `35 V`) **snap
+  to the max in red** and need a confirming tap — you never silently overshoot.
 - **Over-current** — a `CC | OCP` toggle (with descriptions, like the WebLink): the device's
   `currentOver` setting — `CC` = current-limit, `OCP` = trip the output.
 - **Presets** — a header + flush button group of V+I rails; **right-click a preset to save**

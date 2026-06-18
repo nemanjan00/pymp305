@@ -226,10 +226,15 @@ class Keypad(QDialog):
         self._max, self._dec, self._mult = vmax, dec, units[0][1]
         self._s = f"{value:.{dec}f}" if dec else f"{int(value)}"
         v = QVBoxLayout(self); v.setContentsMargins(16, 16, 16, 16); v.setSpacing(10)
-        v.addWidget(_lab(f"{title}  ({unit}, max {vmax:g})", "cardTitle"))
+        self._unit = unit; self._capped = False
+        self._hdr_text = f"{title}  ({unit}, max {vmax:g})"
+        self._hdr = _lab(self._hdr_text, "cardTitle"); v.addWidget(self._hdr)
         self._disp = QLabel(self._s); self._disp.setFont(mono(30))
-        self._disp.setStyleSheet(f"color:{C['accent']};background:{C['bg']};"
-                                 f"border:1px solid {C['stroke']};border-radius:10px;padding:8px 12px;")
+        self._disp_css = (f"color:{C['accent']};background:{C['bg']};"
+                          f"border:1px solid {C['stroke']};border-radius:10px;padding:8px 12px;")
+        self._warn_css = (f"color:{C['danger']};background:{C['bg']};"
+                          f"border:1px solid {C['danger']};border-radius:10px;padding:8px 12px;")
+        self._disp.setStyleSheet(self._disp_css)
         self._disp.setAlignment(Qt.AlignmentFlag.AlignRight); v.addWidget(self._disp)
         grid = QGridLayout(); grid.setSpacing(8)
         for i, k in enumerate(["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "⌫"]):
@@ -244,11 +249,14 @@ class Keypad(QDialog):
             b = QPushButton(lbl); b.setFixedHeight(46)
             if i == 0:
                 b.setObjectName("primary")
-            b.clicked.connect(lambda _, m=mult: (setattr(self, "_mult", m), self.accept()))
+            b.clicked.connect(lambda _, m=mult: self._commit(m))
             bot.addWidget(b)
         v.addLayout(bot)
 
     def _key(self, k):
+        if self._capped:                       # editing after a cap → start fresh
+            self._capped = False; self._s = ""
+            self._disp.setStyleSheet(self._disp_css); self._hdr.setText(self._hdr_text)
         if k == "⌫":
             self._s = self._s[:-1]
         elif k == "." and "." in self._s:
@@ -256,6 +264,21 @@ class Keypad(QDialog):
         else:
             self._s += k
         self._disp.setText(self._s or "0")
+
+    def _commit(self, mult):
+        try:
+            raw = float(self._s or 0) * mult
+        except ValueError:
+            raw = 0.0
+        if raw > self._max + 1e-9 and not self._capped:
+            # over the rail — make it visible: snap to max (red) and require a confirming tap
+            self._capped = True; self._mult = 1.0
+            self._s = f"{self._max:.{self._dec}f}" if self._dec else f"{int(self._max)}"
+            self._disp.setText(self._s); self._disp.setStyleSheet(self._warn_css)
+            self._hdr.setText(f"⚠  capped to max {self._max:g} {self._unit} — tap a unit to accept")
+            return
+        self._mult = 1.0 if self._capped else mult
+        self.accept()
 
     def value(self):
         try:
