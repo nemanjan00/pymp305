@@ -81,23 +81,24 @@ class Lamp(QWidget):
         p.drawText(self.rect().adjusted(20, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, self._label)
 
 
-class CVCCIndicator(QWidget):
-    """Segmented [ CV | CC ] button-group (Bootstrap style): joined cells, rounded outer
-    corners, the active (limiting) mode filled solid. Status display, not a control."""
-    def __init__(self):
-        super().__init__(); self.setFixedSize(124, 40); self._mode = None
+class SegIndicator(QWidget):
+    """Bootstrap-style segmented status group: joined cells, rounded outer corners. Each
+    cell lights independently (it's a status display, not a mutually-exclusive control)."""
+    def __init__(self, cells):                       # cells = [(label, color), ...]
+        super().__init__(); self._cells = cells; self._active = set()
+        self.setFixedSize(62 * len(cells), 40)
 
-    def set_mode(self, mode):   # "CV" | "CC" | None
-        self._mode = mode; self.update()
+    def set_active(self, active):
+        self._active = set(active); self.update()
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height(); r = 9; cw = w / 2
+        w, h = self.width(), self.height(); r = 9; n = len(self._cells); cw = w / n
         outer = QRectF(0.75, 0.75, w - 1.5, h - 1.5)
         f = QFont(); f.setPointSize(14); f.setBold(True); p.setFont(f)
-        for i, (label, col) in enumerate((("CV", C["on"]), ("CC", C["warn"]))):
+        for i, (label, col) in enumerate(self._cells):
             x = i * cw
-            if self._mode == label:                  # fill this half (outer corner rounded)
+            if label in self._active:
                 p.save(); p.setClipRect(QRectF(x, 0, cw, h))
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(col)); p.drawRoundedRect(outer, r, r)
                 p.restore(); p.setPen(QColor(C["panel"]))
@@ -106,7 +107,8 @@ class CVCCIndicator(QWidget):
             p.drawText(QRectF(x, 0, cw, h), Qt.AlignmentFlag.AlignCenter, label)
         p.setPen(QPen(QColor(C["stroke"]), 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(outer, r, r)
-        p.drawLine(QPointF(cw, 5), QPointF(cw, h - 5))
+        for i in range(1, n):
+            p.drawLine(QPointF(i * cw, 5), QPointF(i * cw, h - 5))
 
 
 class BatteryWidget(QWidget):
@@ -460,10 +462,10 @@ class MainWindow(QWidget):
         col.addWidget(self._charts(), 1)
         lampcard = QFrame(); lampcard.setProperty("class", "card"); lampcard.setFixedHeight(60)
         lh = QHBoxLayout(lampcard); lh.setContentsMargins(18, 0, 18, 0); lh.setSpacing(18)
-        self.cvcc = CVCCIndicator()
-        self.lamp_ovp = Lamp("OVP"); self.lamp_ocp = Lamp("OCP")
-        lh.addStretch(1); lh.addWidget(self.cvcc); lh.addStretch(1)   # CV|CC centered
-        lh.addWidget(self.lamp_ovp); lh.addWidget(self.lamp_ocp)
+        self.seg = SegIndicator([("CC", C["warn"]), ("OCP", C["danger"])])
+        self.lamp_ovp = Lamp("OVP")
+        lh.addStretch(1); lh.addWidget(self.seg); lh.addStretch(1)   # CC|OCP centered
+        lh.addWidget(self.lamp_ovp)
         col.addWidget(lampcard)
         stats = QHBoxLayout(); stats.setSpacing(14)
         self.r_pow = _readout("POWER", "W", C["pow"]); self.r_energy = self._energy_card()
@@ -597,9 +599,14 @@ class MainWindow(QWidget):
         h, rem = divmod(int(st["working_time"]), 3600); m, s = divmod(rem, 60)
         self.r_time[1].setText(f"{h:02d}:{m:02d}:{s:02d}")
 
-        self.cvcc.set_mode(("CC" if cc else "CV") if on else None)
         errs = st.get("errors", [])
-        self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"]); self.lamp_ocp.set("errorDcOutOCP" in errs, C["danger"])
+        active = set()
+        if on and cc:
+            active.add("CC")
+        if "errorDcOutOCP" in errs:
+            active.add("OCP")
+        self.seg.set_active(active)
+        self.lamp_ovp.set("errorDcOutOVP" in errs, C["danger"])
 
         t = time.monotonic() - self._t0
         self._t.append(t); self._v.append(st["voltage"]); self._i.append(st["current"])
