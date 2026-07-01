@@ -106,6 +106,10 @@ class DeviceWorker(QObject):
     def run_program(self, on: bool):
         self._call("program_run", on)
 
+    @pyqtSlot(list)
+    def write_program(self, steps: list):
+        self._call("write_program_steps", steps)
+
     def _call(self, method: str, *args):
         if not self._live:
             return

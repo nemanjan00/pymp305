@@ -15,6 +15,13 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   through the normal remote-handshake path.
 - **`read_pdo_index()`** — the device's active USB-PD source-profile index (`0xE4`→`0xE5`);
   pair with `read_pdo()` to get the voltage points the source currently offers.
+- **GUI Programmable (timed DC steps) mode** — new tab (device model 1): shows the stored
+  sequence, highlights the running step live, Start/Stop, and a **step editor** (edit V/A/S per
+  step via the keypad, add/delete steps as joined button-group rows, and "write to device").
+  Sequence read + run are hardware-verified; the write is verified by read-back on an MP305B.
+- **HID fragmentation for large writes** — `build_reports()` splits frames >63 bytes into
+  unpadded 61-byte fragments (WebLink-style), fixing `write_program`/`write_pdo` which were
+  silently dropped as a single oversized report.
 
 ### Fixed
 - **BLE transport works for the first time.** On BLE char AF01 the device answers with

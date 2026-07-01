@@ -590,6 +590,7 @@ class MainWindow(QWidget):
     reqCurrentOver = pyqtSignal(int); reqRemote = pyqtSignal(bool)
     reqMode = pyqtSignal(int); reqCharge = pyqtSignal(dict); reqCharging = pyqtSignal(bool)
     reqSelectPDO = pyqtSignal(int); reqPdOutput = pyqtSignal(bool); reqProgram = pyqtSignal(bool)
+    reqWriteProgram = pyqtSignal(list)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -796,9 +797,17 @@ class MainWindow(QWidget):
         self.prog_btn = OutputButton("■   RUNNING  ·  STOP", "▶   START SEQUENCE")
         self.prog_btn.toggled.connect(self._on_program)
         v.addWidget(self.prog_btn)
-        self.prog_name_lbl = _lab("SEQUENCE", "cardTitle"); v.addWidget(self.prog_name_lbl)
+        hdr = QHBoxLayout(); hdr.addWidget(_lab("SEQUENCE  ·  tap a value to edit", "cardTitle")); hdr.addStretch(1)
+        self.prog_write_btn = QPushButton("⤓ write to device"); self.prog_write_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prog_write_btn.clicked.connect(self._on_write_program); hdr.addWidget(self.prog_write_btn)
+        v.addLayout(hdr)
+        self.prog_name_lbl = _lab("", "sub"); v.addWidget(self.prog_name_lbl)
         self._prog_wrap = QVBoxLayout(); self._prog_wrap.setSpacing(6); v.addLayout(self._prog_wrap)
-        self._prog_lbls = []
+        self.prog_add_btn = QPushButton("＋  add step"); self.prog_add_btn.setFixedHeight(34)
+        self.prog_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prog_add_btn.clicked.connect(self._on_add_step)
+        v.addWidget(self.prog_add_btn)            # ＋ below all steps
+        self._prog_rows = []; self._prog_edit = []; self._prog_dirty = False
         v.addStretch(1)
         return page
 
@@ -808,22 +817,62 @@ class MainWindow(QWidget):
         self.reqProgram.emit(on)
         self._logline(f"sequence {'started' if on else 'stopped'}", C["on"] if on else C["muted"])
 
-    def _prog_row_css(self, active):
-        if active:
-            return (f"background:{C['accent']};color:{C['panel']};border:none;"
-                    f"border-radius:8px;padding:7px 13px;font-weight:800;")
-        return (f"background:{C['card_hi']};color:{C['text']};border:1px solid {C['stroke']};"
-                f"border-radius:8px;padding:7px 13px;")
+    def _grp_css(self, pos, n, active, danger=False):
+        # bootstrap-style joined button group: only the end buttons are rounded,
+        # borders overlap (negative left margin), active row is accent-bordered
+        border = C['accent'] if active else C['stroke']
+        tl = bl = 8 if pos == 0 else 0
+        tr = br = 8 if pos == n - 1 else 0
+        txt = C['danger'] if danger else C['text']
+        ml = "" if pos == 0 else "margin-left:-1px;"
+        return (f"QPushButton{{background:{C['card_hi']};border:1px solid {border};"
+                f"border-top-left-radius:{tl}px;border-bottom-left-radius:{bl}px;"
+                f"border-top-right-radius:{tr}px;border-bottom-right-radius:{br}px;"
+                f"padding:7px;color:{txt};{ml}}}"
+                f"QPushButton:hover{{background:{C['hover']};}}")
 
-    def _rebuild_program(self, steps):
-        for l in self._prog_lbls:
-            l.setParent(None)
-        self._prog_lbls = []
-        for i, (vv, aa, ss) in enumerate(steps):
-            lbl = QLabel(f"{i + 1}.    {vv:g} V   ·   {aa:g} A   ·   {ss:g} s")
-            lbl.setFixedHeight(36); lbl.setFont(mono(13, bold=False))
-            lbl.setStyleSheet(self._prog_row_css(False))
-            self._prog_wrap.addWidget(lbl); self._prog_lbls.append(lbl)
+    def _render_prog_edit(self, active_idx=-1):
+        for row in self._prog_rows:
+            row.setParent(None)
+        self._prog_rows = []
+        for i, (vv, aa, ss) in enumerate(self._prog_edit):
+            row = QFrame(); row.setStyleSheet("QFrame{border:none;}")
+            h = QHBoxLayout(row); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(0)
+            num = _lab(f"{i + 1}", "sub"); num.setFixedWidth(20); h.addWidget(num)
+            active = (i == active_idx)
+            fields = (("V", f"{vv:g} V"), ("A", f"{aa:g} A"), ("S", f"{ss:g} s"))
+            n = len(fields) + 1                       # + delete button
+            for pos, (field, txt) in enumerate(fields):
+                b = QPushButton(txt); b.setStyleSheet(self._grp_css(pos, n, active))
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.clicked.connect(lambda _=False, i=i, f=field: self._edit_step(i, f))
+                h.addWidget(b, 1)
+            xb = QPushButton("✕"); xb.setFixedWidth(36); xb.setStyleSheet(self._grp_css(n - 1, n, active, danger=True))
+            xb.setCursor(Qt.CursorShape.PointingHandCursor)
+            xb.clicked.connect(lambda _=False, i=i: self._del_step(i)); h.addWidget(xb)
+            self._prog_wrap.addWidget(row); self._prog_rows.append(row)
+
+    def _edit_step(self, i, field):
+        if i >= len(self._prog_edit):
+            return
+        idx = {"V": 0, "A": 1, "S": 2}[field]
+        unit, vmax, dec = {"V": ("V", 30.0, 2), "A": ("A", 5.0, 3), "S": ("s", 9999, 0)}[field]
+        dlg = Keypad(f"Step {i + 1}  {field}", self._prog_edit[i][idx], unit, vmax, dec, [(unit, 1.0)], self)
+        if dlg.exec():
+            self._prog_edit[i][idx] = dlg.value(); self._prog_dirty = True
+            self._render_prog_edit()
+
+    def _del_step(self, i):
+        if i < len(self._prog_edit) and len(self._prog_edit) > 1:
+            del self._prog_edit[i]; self._prog_dirty = True; self._render_prog_edit()
+
+    def _on_add_step(self):
+        self._prog_edit.append([5.0, 1.0, 5.0]); self._prog_dirty = True; self._render_prog_edit()
+
+    def _on_write_program(self):
+        steps = [tuple(s) for s in self._prog_edit]
+        self.reqWriteProgram.emit(steps); self._prog_dirty = False
+        self._logline(f"writing {len(steps)}-step sequence to device…", C["accent"])
 
     _PDO_TOGGLE_CSS = (
         "QPushButton{{background:{card};border:{bw}px solid {border};border-radius:9px;"
@@ -979,6 +1028,7 @@ class MainWindow(QWidget):
         self.reqCharging.connect(self.worker.set_charging); self.reqSelectPDO.connect(self.worker.select_pdo)
         self.reqPdOutput.connect(self.worker.set_pd_output)
         self.reqProgram.connect(self.worker.run_program)
+        self.reqWriteProgram.connect(self.worker.write_program)
         self.thread.start()
 
     # ---- helpers
@@ -1149,15 +1199,18 @@ class MainWindow(QWidget):
         for i, b in enumerate(self._pdo_btns):
             vi = pv[i] if i < len(pv) else 0.0
             b.setStyleSheet(self._pdo_css(vi > 0 and abs(vi - neg_v) < 0.7))
-        # Program panel: step list, current step highlighted, run state on the button
-        steps = st.get("program_steps", [])
-        if len(self._prog_lbls) != len(steps):
-            self._rebuild_program(steps)
-        name = st.get("program_name", "")
-        self.prog_name_lbl.setText(f"SEQUENCE  ·  {name}" if name else "SEQUENCE")
+        # Program panel: reflect the device's stored steps unless the user is editing
+        # (dirty); highlight the running step. Re-render only when something changed.
         running = bool(st.get("program_running", False)); idx = st.get("program_index", 0)
-        for i, lbl in enumerate(self._prog_lbls):
-            lbl.setStyleSheet(self._prog_row_css(running and i == idx))
+        if not self._prog_dirty:
+            dev = [list(s) for s in st.get("program_steps", [])]
+            active = idx if running else -1
+            key = (tuple(tuple(s) for s in dev), active)
+            if key != getattr(self, "_prog_render_key", None):
+                self._prog_edit = dev
+                self._render_prog_edit(active)
+                self._prog_render_key = key
+        self.prog_name_lbl.setText(st.get("program_name", ""))
         if self.prog_btn.isChecked() != running:
             self.prog_btn.setChecked(running)
         self._sync = False

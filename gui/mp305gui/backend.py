@@ -133,7 +133,10 @@ class RealBackend:
                 if pl.entries:
                     e = pl.entries[0]; self._prog_name = e.name
                     ps = self._psu.read_program_steps(1, e.num)   # first stored sequence (id 1)
-                    self._prog_steps = [(s["V"], s["A"], s["S"]) for s in ps.steps]
+                    steps = [(s["V"], s["A"], s["S"]) for s in ps.steps]
+                    while steps and steps[-1][0] == 0 and steps[-1][1] == 0:  # drop terminator(s)
+                        steps.pop()
+                    self._prog_steps = steps
             except Exception:
                 pass
         return self._prog_name, self._prog_steps
@@ -142,6 +145,18 @@ class RealBackend:
         from pymp305 import commands as C
         self._psu.program_connect(C.ProgramConnect(remote_con=1, program_control=2,
                                                    output=1 if on else 0, model=1))
+
+    def write_program_steps(self, steps):
+        # steps: list of (V, A, S) — write to slot 1. Verified flow: program mode ->
+        # program_change (flag 2 = child items follow) -> write (with a (0,0,0) terminator).
+        dicts = [{"V": float(v), "A": float(a), "S": float(s)} for (v, a, s) in steps]
+        dicts.append({"V": 0, "A": 0, "S": 0})           # terminator
+        name = getattr(self, "_prog_name", "") or "Seq"
+        self._psu.set_mode(1)
+        self._psu.program_change(1, name, len(dicts), is_last=1, remove=2)
+        self._psu.write_program(1, dicts)
+        self._prog_steps = [(float(v), float(a), float(s)) for (v, a, s) in steps]  # refresh cache
+        self._prog_name = name
 
     def _caps(self):
         # cable + PDO list don't change live — read once, cache.
@@ -286,6 +301,10 @@ class SimBackend:
         self.prog_running = bool(on); self.on = bool(on)
         if on:
             self.prog_index = 0; self.prog_t = 0.0
+
+    def write_program_steps(self, steps):
+        self.prog_steps = [(float(v), float(a), float(s)) for (v, a, s) in steps] or [(5.0, 1.0, 5.0)]
+        self.prog_index = 0; self.prog_t = 0.0
 
     def _charge_step(self, dt):
         if not self.charging_ext or self.cbatt >= 100.0:
