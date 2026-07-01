@@ -6,6 +6,20 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 > physical MP305B. Charge/USB-PD/programmable *control*, the MP305A, and OTA remain unverified
 > — see the README banner.
 
+## 0.6.1
+
+### Added
+- **`set_output(..., reapply=True)`** — briefly cycles the output off→on after applying, so a
+  *lowered* current limit engages constant-current mode immediately.
+
+### Notes
+- **Device quirk (MP305B, app V1.6.0.46):** lowering the current limit while the output is
+  already on does **not** engage CC — the CC threshold only re-arms on output-enable (raising
+  the limit live works fine). Verified against ISDT's WebLink protocol: it sends the identical
+  `0xC8` command, so this is firmware behaviour, not a missing feature. Set the current limit
+  *before* enabling output, or pass `reapply=True`. Data readback (V / I / W) is accurate —
+  confirmed with a 390 Ω load against Ohm's law, and CC regulation itself is accurate once armed.
+
 ## 0.6.0
 
 First release validated against physical hardware (an **MP305B**, app V1.6.0.46). Several

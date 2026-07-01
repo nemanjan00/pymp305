@@ -119,6 +119,23 @@ def test_e2e_set_output_rejected_without_remote():
         pass
 
 
+def test_e2e_set_output_reapply_cycles_output():
+    # reapply=True should cycle the output off->on after applying so a lowered
+    # current limit re-arms; last two control frames must be output=0 then output=1
+    psu = MP305(FakeHID([
+        _resp(P.RESP_CONTROL, b"\x00"),                       # request_remote
+        _resp(P.RESP_STATE, _state_payload(out=1)),           # read_state (output on)
+        _resp(P.RESP_CONTROL, b"\x00"),                       # apply setpoint
+        _resp(P.RESP_CONTROL, b"\x00"),                       # cycle: output off
+        _resp(P.RESP_CONTROL, b"\x00"),                       # cycle: output on
+        _resp(P.RESP_STATE, _state_payload(out=1)),           # final read_state
+    ]))
+    psu.set_output(current=0.003, reapply=True)
+    off = struct.unpack("<BHHBBBBBB", P.parse_report(psu._dev.written[3]).payload)
+    on = struct.unpack("<BHHBBBBBB", P.parse_report(psu._dev.written[4]).payload)
+    assert off[6] == 0 and on[6] == 1     # the output field toggles 0 then 1
+
+
 def test_e2e_set_mode_switch():
     # switch DC(0) -> USB-PD(2): read_state, request remote (via current mode 0xC8),
     # switch (0xC8 with new model), then confirm via read_state

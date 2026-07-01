@@ -52,6 +52,14 @@ with MP305.open() as psu:
 
 See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 
+> **Device quirk — lowering the current limit mid-run.** On the MP305 (observed: MP305B app
+> V1.6.0.46), the constant-current threshold only re-arms when the output is enabled. If you
+> **lower** the current limit while the output is already on, it will **not** enter CC until
+> the output is cycled — *raising* it live works fine. This matches ISDT's own WebLink (same
+> `0xC8` command), so it's firmware behaviour. Either set the current limit before turning the
+> output on, or pass `set_output(current=..., reapply=True)` to briefly cycle the output for
+> you. Readback (V/I/W) and CC regulation itself are accurate once armed.
+
 ## API surface
 
 | Method | Does |

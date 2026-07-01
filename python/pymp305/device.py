@@ -318,14 +318,23 @@ class MP305:
 
     def set_output(self, voltage: float | None = None, current: float | None = None,
                    on: bool | None = None, *, model: int = 0,
-                   real_change: int = 3, timeout_ms: int = 1500) -> State:
+                   real_change: int = 3, reapply: bool = False, timeout_ms: int = 1500) -> State:
         """Convenience: take remote control and set V / I / output in one call.
 
         Unspecified values are read from the current state so they are preserved.
         Returns the fresh state after the change.
+
+        `reapply`: when True and the output ends up on, the output is briefly
+        cycled off->on after applying. This works around a device quirk: *lowering*
+        the current limit while the output is already on does not engage
+        constant-current mode (the CC threshold only re-arms on output-enable);
+        raising it live works fine. Use `reapply=True` when you lower the current
+        limit mid-run and need CC to take effect immediately -- note it momentarily
+        interrupts the output.
         """
         self._ensure_remote(timeout_ms)
         st = self.read_state(timeout_ms=timeout_ms)
+        target_on = st.output if on is None else (1 if on else 0)
         cmd = ControlCommand(
             remote_con=1,
             set_voltage=st.set_voltage if voltage is None else voltage,
@@ -333,7 +342,7 @@ class MP305:
             real_change=real_change,
             voltage_slow=st.voltage_slow,
             current_over=st.current_over,
-            output=st.output if on is None else (1 if on else 0),
+            output=target_on,
             model=model,
             refresh=0,
         )
@@ -344,6 +353,11 @@ class MP305:
             f = self.control(cmd, timeout_ms=timeout_ms)
             if self._control_status(f) == 1:
                 raise MP305Error("control command rejected: device refused remote control")
+        if reapply and target_on:               # cycle output so a lowered current limit re-arms as CC
+            cmd.output = 0
+            self.control(cmd, timeout_ms=timeout_ms)
+            cmd.output = 1
+            self.control(cmd, timeout_ms=timeout_ms)
         return self.read_state(timeout_ms=timeout_ms)
 
     def output_on(self, **kw) -> State:
