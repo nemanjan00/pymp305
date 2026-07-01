@@ -30,10 +30,10 @@ def _state_to_dict(st, info_name=None) -> dict:
         "energy": st.energy, "working_time": st.working_time,
         "battery": st.percentage, "battery_state": st.battery_state,
         "charging": st.battery_state == 1,
-        "out_state": st.out_state,          # device regulation status: 1=CC, 2=CV
+        "out_state": st.out_state,          # device regulation status: 1=CV, 2=CC (verified on hardware)
         "current_over": st.current_over,     # over-current behaviour setting: 0=CC, 1=OCP
         "errors": list(getattr(st, "errors", []) or []),
-        "mode": "CC" if st.out_state == 1 else "CV",
+        "mode": "CC" if st.out_state == 2 else "CV",
     }
 
 
@@ -91,12 +91,9 @@ class RealBackend:
         self._psu.set_output(voltage=v, current=a, on=on)
 
     def set_mode(self, model):
-        from pymp305 import ControlCommand
-        st = self._psu.read_state()
-        self._psu.control(ControlCommand(
-            remote_con=1, set_voltage=st.set_voltage, set_current=st.set_current,
-            real_change=3, voltage_slow=st.voltage_slow, current_over=st.current_over,
-            output=0, model=int(model)))
+        # switch via the driver, which routes through the current mode's connect
+        # command and holds remote (the device reverts to DC if remote is released)
+        self._psu.set_mode(int(model))
 
     def set_charge(self, chem=None, cells=None, current=None):
         if chem is not None: self._chem = int(chem)
@@ -115,12 +112,8 @@ class RealBackend:
         self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=int(i), update=1, output=1))
 
     def set_current_over(self, mode):
-        from pymp305 import ControlCommand
-        st = self._psu.read_state()
-        self._psu.control(ControlCommand(
-            remote_con=1, set_voltage=st.set_voltage, set_current=st.set_current,
-            real_change=3, voltage_slow=st.voltage_slow, current_over=int(mode),
-            output=st.output, model=st.model))
+        # CC (0) / OCP (1); set_output does the remote handshake and preserves V/I/output
+        self._psu.set_output(current_over=int(mode))
 
     def set_remote(self, held):
         # take remote control (remote_con=1, preserving V/I/output) or hand it back to the panel
@@ -197,7 +190,7 @@ class SimBackend:
         current = self.charge_a * taper
         pack_v = self.cells * (3.2 + 0.9 * self.cbatt / 100.0)        # ~3.2→4.1 V/cell
         self.cbatt = min(100.0, self.cbatt + current * dt * 2.0)
-        return pack_v, current, (1 if taper >= 0.999 else 2)
+        return pack_v, current, (2 if taper >= 0.999 else 1)   # out_state: 2=CC (bulk), 1=CV (taper)
 
     def reset_energy(self):
         self.energy_wh = 0.0
@@ -212,14 +205,14 @@ class SimBackend:
         self._last = now
         self._n += 1
         ripple = 0.01 * math.sin(self._n / 6.0)
-        out_state = 0           # 0 = off, 1 = CC, 2 = CV
+        out_state = 0           # 0 = off, 1 = CV, 2 = CC (matches MP305B hardware)
         if self.mode == MODE_CHARGE:                 # charging an external pack
             voltage, current, out_state = self._charge_step(dt)
         elif self.mode == MODE_PD:                   # USB-PD: output fixed to the selected PDO
             pv, pa = SIM_PDOS[self.pdo_sel]
             if self.on:
                 i = min(pa, pv / self.load); voltage = pv; current = i
-                out_state = 1 if i >= pa - 1e-9 else 2
+                out_state = 2 if i >= pa - 1e-9 else 1
             else:
                 voltage = current = 0.0
         else:                                        # DC PSU
@@ -230,9 +223,9 @@ class SimBackend:
                     self.on = False; self._ocp_trip = True
                     voltage = current = 0.0
                 elif over:                           # CC: limit current
-                    current = self.set_a; voltage = self.set_a * self.load; out_state = 1
+                    current = self.set_a; voltage = self.set_a * self.load; out_state = 2
                 else:                                # CV: hold voltage
-                    voltage = self.set_v; current = i_cv; out_state = 2
+                    voltage = self.set_v; current = i_cv; out_state = 1
             else:
                 voltage = current = 0.0
         live = self.on or (self.mode == MODE_CHARGE and self.charging_ext)
@@ -249,9 +242,9 @@ class SimBackend:
             "output": int(self.on), "model": self.mode, "temperature": round(self.temp),
             "energy": round(self.energy_wh, 3), "working_time": int(now - self._t0),
             "battery": int(round(self.batt)), "battery_state": 1 if self.charging else 0,
-            "charging": self.charging, "out_state": out_state, "current_over": self.current_over,
+            "charging": self.charging, "out_state": out_state, "current_over": self.current_over,  # 1=CV 2=CC
             "errors": ["errorDcOutOCP"] if self._ocp_trip else [],
-            "mode": "CC" if out_state == 1 else "CV",
+            "mode": "CC" if out_state == 2 else "CV",
             "emarker": SIM_EMARKER, "pdos": SIM_PDOS, "pdo_sel": self.pdo_sel,
             "chem": self.chem, "cells": self.cells, "charge_current": self.charge_a,
             "charging_ext": self.charging_ext, "charge_pct": int(round(self.cbatt)),

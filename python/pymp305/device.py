@@ -317,12 +317,13 @@ class MP305:
         raise MP305Error(f"mode switch to {model} not confirmed (still {last})")
 
     def set_output(self, voltage: float | None = None, current: float | None = None,
-                   on: bool | None = None, *, model: int = 0,
+                   on: bool | None = None, *, model: int = 0, current_over: int | None = None,
                    real_change: int = 3, reapply: bool = False, timeout_ms: int = 1500) -> State:
         """Convenience: take remote control and set V / I / output in one call.
 
         Unspecified values are read from the current state so they are preserved.
-        Returns the fresh state after the change.
+        `current_over` sets the over-current behaviour (0 = CC current-limit,
+        1 = OCP trip); left as None it is preserved. Returns the fresh state.
 
         `reapply`: when True and the output ends up on, the output is briefly
         cycled off->on after applying. This works around a device quirk: *lowering*
@@ -341,7 +342,7 @@ class MP305:
             set_current=st.set_current if current is None else current,
             real_change=real_change,
             voltage_slow=st.voltage_slow,
-            current_over=st.current_over,
+            current_over=st.current_over if current_over is None else current_over,
             output=target_on,
             model=model,
             refresh=0,

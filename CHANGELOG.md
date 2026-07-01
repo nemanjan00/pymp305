@@ -11,6 +11,19 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 ### Added
 - **`set_output(..., reapply=True)`** — briefly cycles the output off→on after applying, so a
   *lowered* current limit engages constant-current mode immediately.
+- **`set_output(..., current_over=…)`** — set the over-current behaviour (0 = CC, 1 = OCP)
+  through the normal remote-handshake path.
+
+### Fixed
+- **CV/CC regulation status was inverted.** `outState` is `1 = CV, 2 = CC` on real hardware
+  (measured with a 390 Ω load); the GUI and simulator had it backwards, so the dashboard
+  labelled CV as CC. Fixed the GUI, the sim backend, and PROTOCOL.md.
+- **GUI mode switching** now uses the driver's `set_mode()` (the old backend built a raw
+  `0xC8` that only worked from DC); **GUI CC/OCP toggle** now goes through the remote
+  handshake via `set_output(current_over=…)`.
+- Refreshed `gui/dashboard.png` from the **real MP305B** (DC mode, live charts into a 390 Ω
+  load). Other GUI shots stay simulator-rendered (charge needs a battery; the USB-PD data
+  path has separate pre-existing bugs; the keypad is a modal overlay).
 
 ### Notes
 - **Device quirk (MP305B, app V1.6.0.46):** lowering the current limit while the output is

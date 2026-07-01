@@ -136,6 +136,19 @@ def test_e2e_set_output_reapply_cycles_output():
     assert off[6] == 0 and on[6] == 1     # the output field toggles 0 then 1
 
 
+def test_e2e_set_output_current_over():
+    # set_output(current_over=1) sets the OCP mode byte in the 0xC8 frame (via handshake)
+    psu = MP305(FakeHID([
+        _resp(P.RESP_CONTROL, b"\x00"),               # request_remote
+        _resp(P.RESP_STATE, _state_payload()),        # read_state
+        _resp(P.RESP_CONTROL, b"\x00"),               # apply
+        _resp(P.RESP_STATE, _state_payload()),        # final read_state
+    ]))
+    psu.set_output(current_over=1)
+    ctrl = struct.unpack("<BHHBBBBBB", P.parse_report(psu._dev.written[2]).payload)
+    assert ctrl[5] == 1     # current_over field = OCP
+
+
 def test_e2e_set_mode_switch():
     # switch DC(0) -> USB-PD(2): read_state, request remote (via current mode 0xC8),
     # switch (0xC8 with new model), then confirm via read_state

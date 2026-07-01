@@ -30,7 +30,8 @@ protocol over two transports:
  idx  field
   0   N        = (frame_length_without_this_byte) & 0xFF   ── set automatically
   1   0xAA     frame-start marker
-  2   0x12     protocol/group id (constant)
+  2   group id — 0x12 on commands (host→device). NOTE: real MP305B hardware
+      answers with group id 0x21 on responses, not 0x12 (see Response framing).
   3   L        payload length = 1 (cmd byte) + len(data)
   4   CMD      command byte
   5.. DATA     little-endian fields (see commands)
@@ -49,8 +50,14 @@ Two stuffing rules tie TX and RX together:
 (Implemented in `Cmd.processHexArray` / `Cmd.add0xAA` in the JS; mirrored in `protocol.py`.)
 
 ### Response framing
-Identical, with `CMD` at index 4 of the de-stuffed buffer and payload at index 5.
-Responses generally use `request_cmd + 1`.
+Identical stuffing/checksum, with `CMD` at index 4 of the de-stuffed buffer and payload at
+index 5. Responses generally use `request_cmd + 1`.
+
+> **Verified on hardware (MP305B, app V1.6.0.46):** responses carry group id **`0x21`** at
+> index 2, not the `0x12` used on commands. The WebLink source only ever builds `0x12`
+> frames, so this was missed until first hardware contact; `parse_report` accepts both.
+> The realtime poll `0xBD` is **not answered** by this unit — use `0xC2` (same `0xC3`
+> response) instead; `read_state()` falls back automatically.
 
 ## Commands (CMD byte) and responses
 
@@ -73,8 +80,22 @@ Responses generally use `request_cmd + 1`.
 | → | `0xF2/0xF4/0xF6/0x2005/0x2006` | OTA erase/write/checksum | — | — |
 
 ### `0xC8` Control payload (`DPConnectModel`)
+
+> **Remote handshake (verified on hardware).** Taking control is **two steps**: first send
+> `remoteCon=2` (a *request* — the device grants it, `0xC9` status 0, and it does not touch
+> setpoints); only then are `remoteCon=1` changes applied. A bare `remoteCon=1` without a
+> prior request is rejected (`0xC9` status 1) and silently ignored. The `0xC9` status byte
+> (payload[0], shared by `0xE3`/`0xE9`/`0xEF` too): **0 = accepted, 1 = rejected/no remote,
+> 2 = pending**. Releasing (`remoteCon=0`) reverts the unit to DC mode.
+>
+> **Mode switching** goes through the *current* mode's connect command (`0xC8`/`0xE2`/`0xE8`/
+> `0xEE`) carrying the new `model`; the change only persists while remote is held.
+>
+> **CC re-arm quirk:** *lowering* the current limit while the output is on does not engage CC
+> until the output is cycled (raising it works live).
+
 ```
-remoteCon  : u8   1 = take remote control (must be 1 to change anything), 0 = release
+remoteCon  : u8   2 = request remote control, 1 = apply (holding control), 0 = release
 setVoltage : u16  volts * 100      (10 mV units)
 setCurrent : u16  amps  * 1000     (1 mA units)
 realChange : u8   live-apply flags: 1=V,2=I,3=both
@@ -99,7 +120,7 @@ cells u8, current u16 (A*1000), output u8, model u8
 
 ## State response `0xC3` (`DP3005Resp`) — payload from index 5
 ```
-outState     u8
+outState     u8    regulation status: 0=off, 1=CV, 2=CC  (verified on MP305B hardware)
 batteryState u8
 percentage   u8                 battery %
 voltage      u16   / 100  -> V   (measured output)
@@ -143,11 +164,14 @@ slopeSteps u16, currentOver u16, [usbLine u16 if N>14]
 deviceId[8], hwVer[4] (main.sub.mend.layout), bootVer[4], appVer[4], deviceName[10] (ascii)
 ```
 
-## Typical session (as the app does it)
+## Typical session (as the app does it, corrected against MP305B hardware)
 1. `requestDevice` → open HID. 2. send `0xE0` → parse `0xE1` (info / firmware ver).
 3. send `0xC4` (system) → `0xC5`; send `0xC2` (state) → `0xC3`.
-4. To control: send `0xC8` with `remoteCon=1, model=0, setVoltage, setCurrent, output`.
-5. Poll `0xBD` (realtime) every ~3 s → `0xC3` and update the UI.
+   (`0xBD` realtime is unanswered on this unit — poll `0xC2` instead.)
+4. Take control: send `0xC8` with `remoteCon=2` → expect `0xC9` status 0 (granted).
+5. To control: send `0xC8` with `remoteCon=1, model=0, setVoltage, setCurrent, output`
+   → `0xC9` status 0. (A bare `remoteCon=1` without step 4 is rejected, status 1.)
+6. Poll `0xC2` → `0xC3` (~3 s) and update the UI. Release with `remoteCon=0` when done.
 
 ## BLE transport
 GATT service `0000af00-…`. Commands are written to characteristic **AF01** as raw

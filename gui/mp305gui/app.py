@@ -942,9 +942,10 @@ class MainWindow(QWidget):
             self.out_btn.setChecked(on); self._logline(f"output {'ON' if on else 'OFF'}", C["on"] if on else C["muted"])
         self._sync = False
 
-        # CV/CC is the device's regulation status (out_state: 2=CV, 1=CC) — read-only
+        # CV/CC is the device's regulation status (out_state: 1=CV, 2=CC, verified on
+        # MP305B hardware) — read-only
         out_state = st.get("out_state", 0)
-        is_cv, is_cc = out_state == 2, out_state == 1
+        is_cv, is_cc = out_state == 1, out_state == 2
         self.ch_v.set_live(on); self.ch_a.set_live(on)
         self.ch_v.set_measured(st["voltage"]); self.ch_a.set_measured(st["current"])
         self.ch_v.set_active(is_cv, "CV"); self.ch_a.set_active(is_cc, "CC")
