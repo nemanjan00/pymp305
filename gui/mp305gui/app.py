@@ -597,14 +597,51 @@ class MainWindow(QWidget):
         self.resize(1180, 860)
         self.setMinimumSize(1060, 800)        # floor: stops anyone cramping it into nonsense
         self._sync = False; self._init_sp = False; self._last_errors = set()
-        self._connected = False; self._remote_held = True
+        self._connected = False; self._remote_held = True; self._output_on = False
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
         self.backend, self.is_real = make_backend(prefer_real)
         self._build_ui(); self._start_worker()
         self._pow_eased = EasedValue(lambda v: self.r_pow[1].setText(f"{v:.2f}"))
         self.batt.clicked.connect(self._toggle_charge)
+        self._build_overlay(); self._show_overlay()   # cover the UI until the first reading lands
         self.reqConnect.emit()
+
+    # ---- startup / connecting overlay -----------------------------------
+    def _build_overlay(self):
+        self._overlay = QWidget(self); self._overlay.setObjectName("overlay")
+        self._overlay.setStyleSheet(f"#overlay {{ background: {C['bg']}; }}")
+        lay = QVBoxLayout(self._overlay)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter); lay.setSpacing(16)
+        title = QLabel("⚡ MP305"); title.setFont(mono(44)); title.setStyleSheet(f"color:{C['accent']};")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._overlay_msg = QLabel("connecting…"); self._overlay_msg.setFont(mono(15, bold=False))
+        self._overlay_msg.setStyleSheet(f"color:{C['muted']};")
+        self._overlay_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title); lay.addWidget(self._overlay_msg)
+        self._spin_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"; self._spin_i = 0
+        self._spin_timer = QTimer(self); self._spin_timer.setInterval(90)
+        self._spin_timer.timeout.connect(self._spin)
+        self._overlay.hide()
+
+    def _spin(self):
+        self._spin_i = (self._spin_i + 1) % len(self._spin_frames)
+        self._overlay_msg.setText(f"{self._spin_frames[self._spin_i]}   connecting…")
+
+    def _show_overlay(self):
+        self._overlay.setGeometry(self.rect()); self._overlay.show(); self._overlay.raise_()
+        self._spin_i = 0; self._spin_timer.start()
+
+    def _hide_overlay(self):
+        self._spin_timer.stop()
+        if self._overlay.isVisible():
+            self._overlay.hide()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        ov = getattr(self, "_overlay", None)
+        if ov is not None:
+            ov.setGeometry(self.rect())
 
     def _toggle_charge(self):
         fn = getattr(self.backend, "toggle_charging", None)
@@ -863,7 +900,10 @@ class MainWindow(QWidget):
 
     # ---- helpers
     def _toggle_conn(self):
-        (self.reqConnect if self.btn_conn.text() == "Connect" else self.reqDisconnect).emit()
+        if self.btn_conn.text() == "Connect":
+            self._show_overlay(); self.reqConnect.emit()
+        else:
+            self.reqDisconnect.emit()
 
     def _set_enabled(self, on):
         self._connected = on
@@ -875,7 +915,9 @@ class MainWindow(QWidget):
         live = self._connected and self._remote_held
         self.stack.setEnabled(live)                       # all per-mode control panels
         for b, _ in self._mode_tabs.values():
-            b.setEnabled(self._connected)                 # can switch mode whenever connected
+            # can switch mode when connected, but NOT while the output is on (the device
+            # won't switch modes with a live output — mirror that lockout in the UI)
+            b.setEnabled(self._connected and not self._output_on)
         self.btn_remote.setEnabled(self._connected)
 
     def _on_remote_toggle(self, held):
@@ -929,14 +971,20 @@ class MainWindow(QWidget):
         self._logline(f"connected — {info.get('model','MP305')} {info.get('fw','')}", C["on"])
 
     def _on_disconnected(self, _):
+        self._hide_overlay()
         self._set_status("○ Disconnected", C["muted"], tint=False)
         self.btn_conn.setText("Connect"); self._set_enabled(False); self._logline("disconnected", C["warn"])
 
     def _on_error(self, msg):
+        self._hide_overlay()   # don't trap the user behind the loader if connecting failed
         self._logline(f"error: {msg}", C["danger"])
 
     def _on_state(self, st):
         on = bool(st["output"])
+        self._hide_overlay()                 # first reading landed — reveal the dashboard
+        if on != self._output_on:            # output on/off gates mode switching
+            self._output_on = on
+            self._refresh_controls()
         self._sync = True
         if not self._init_sp:
             self.ch_v.set_setpoint(st["set_voltage"]); self.ch_a.set_setpoint(st["set_current"]); self._init_sp = True

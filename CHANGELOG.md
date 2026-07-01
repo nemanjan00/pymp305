@@ -49,6 +49,14 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   Charge and keypad shots stay simulator-rendered (charge needs a battery; the keypad is a
   modal overlay).
 
+### Changed
+- **GUI**: a startup **connecting overlay** now covers the dashboard until the first reading
+  arrives (the connect + first poll take a second or two), instead of showing a half-populated
+  UI that "catches up". It also reappears on reconnect and steps aside on error/disconnect.
+- **GUI**: **mode switching (DC / Charge / USB-PD) is disabled while the output is on** — the
+  device won't change mode with a live output, so the tabs are now locked until output is off
+  (mirrors WebLink).
+
 ### Notes
 - **Device quirk (MP305B, app V1.6.0.46):** lowering the current limit while the output is
   already on does **not** engage CC — the CC threshold only re-arms on output-enable (raising
