@@ -173,6 +173,12 @@ def test_e2e_write_program_request():
     assert P.parse_report(psu._dev.written[0]).cmd == 0xDA
 
 
+def test_e2e_read_pdo_index():
+    psu = MP305(FakeHID([_resp(0xE5, bytes([7]))]))
+    assert psu.read_pdo_index() == 7
+    assert P.parse_report(psu._dev.written[0]).cmd == 0xE4
+
+
 def test_e2e_pdo_connect_request():
     # pdo_connect goes through the shared remote handshake first (0xC8 remoteCon=2)
     psu = MP305(FakeHID([

@@ -415,6 +415,12 @@ class MP305:
         f = self.request(cmd, P.RESP_PDO, payload, timeout_ms)
         return PDO.parse(f.values, index=5)
 
+    def read_pdo_index(self, timeout_ms: int = 1500) -> int:
+        """The device's active USB-PD source-profile index (0xE4 -> 0xE5).
+        Use it with read_pdo() to get the voltage points the source currently offers."""
+        f = self.request(0xE4, 0xE5, timeout_ms=timeout_ms)
+        return f.payload[0] if f.payload else 0
+
     def pdo_connect(self, conn: C.PDOConnect, timeout_ms: int = 1500) -> P.Frame:
         cmd, payload = conn.build()
         return self._connect(cmd, P.RESP_PDO_CONNECT, payload, timeout_ms)

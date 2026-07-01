@@ -13,6 +13,8 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   *lowered* current limit engages constant-current mode immediately.
 - **`set_output(..., current_over=…)`** — set the over-current behaviour (0 = CC, 1 = OCP)
   through the normal remote-handshake path.
+- **`read_pdo_index()`** — the device's active USB-PD source-profile index (`0xE4`→`0xE5`);
+  pair with `read_pdo()` to get the voltage points the source currently offers.
 
 ### Fixed
 - **CV/CC regulation status was inverted.** `outState` is `1 = CV, 2 = CC` on real hardware
@@ -21,9 +23,13 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 - **GUI mode switching** now uses the driver's `set_mode()` (the old backend built a raw
   `0xC8` that only worked from DC); **GUI CC/OCP toggle** now goes through the remote
   handshake via `set_output(current_over=…)`.
-- Refreshed `gui/dashboard.png` from the **real MP305B** (DC mode, live charts into a 390 Ω
-  load). Other GUI shots stay simulator-rendered (charge needs a battery; the USB-PD data
-  path has separate pre-existing bugs; the keypad is a modal overlay).
+- **GUI USB-PD list** now shows the active source profile's real voltage points. The backend
+  `_caps()` read no PDOs (it broke on the first empty index and read wrong item keys); it now
+  reads the active profile (`read_pdo_index()` → `read_pdo()`) and its `voltage_v`/`current_a`
+  items. Verified against a real 60 W source (5/9/12/15/20 V @ 3 A).
+- Refreshed `gui/dashboard.png` and `gui/usbpd-mode.png` from the **real MP305B** (dark theme).
+  Charge and keypad shots stay simulator-rendered (charge needs a battery; the keypad is a
+  modal overlay).
 
 ### Notes
 - **Device quirk (MP305B, app V1.6.0.46):** lowering the current limit while the output is

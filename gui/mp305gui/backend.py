@@ -70,21 +70,27 @@ class RealBackend:
         return d
 
     def _caps(self):
-        # cable + PDO list don't change live — read once, cache. (Untested on hardware.)
+        # cable + PDO list don't change live — read once, cache.
+        # The MP305 is a USB-PD *source* with several power profiles; the active one
+        # (0xE4) lists the voltage points it offers (5/9/12/15/20 V, each with a
+        # current). Show those. (Verified against a real 60 W source on hardware.)
         if not hasattr(self, "_em"):
             try:
                 em = self._psu.read_emarker()
-                self._em = em.get("summary") or ("USB-C cable" if em.get("present") else "no e-marked cable")
+                self._em = "USB-C cable" if em.get("present") else "no e-marked cable"
             except Exception:
                 self._em = "—"
             self._pl = []
-            for i in range(8):
-                try:
-                    p = self._psu.read_pdo(i)
-                    if p and p.items:
-                        self._pl.append((p.items[0].get("v", 0.0), p.items[0].get("a", 0.0)))
-                except Exception:
-                    break
+            try:
+                idx = self._psu.read_pdo_index()
+                self._pdo_sel = idx
+                p = self._psu.read_pdo(idx)
+                for it in (p.items if p else []):
+                    v, a = it.get("voltage_v", 0.0), it.get("current_a", 0.0)
+                    if v > 0:
+                        self._pl.append((v, a))
+            except Exception:
+                pass
         return self._em, self._pl
 
     def apply(self, v=None, a=None, on=None):
