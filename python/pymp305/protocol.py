@@ -35,7 +35,8 @@ REPORT_ID = 0x01
 REPORT_SIZE = 64            # output report payload size (zero padded)
 
 FRAME_START = 0xAA
-GROUP_ID = 0x12
+GROUP_ID = 0x12             # host -> device command group
+RESP_GROUP_ID = 0x21       # device -> host response group (observed on real MP305B hardware)
 
 # ---- command bytes -------------------------------------------------------
 CMD_HW_INFO        = 0xE0   # -> 0xE1
@@ -144,7 +145,7 @@ def parse_report(raw: bytes) -> Frame | None:
     # Locate the 0xAA,0x12 header; the byte before it is the length byte N.
     start = -1
     for i in range(len(buf) - 1):
-        if buf[i] == FRAME_START and buf[i + 1] == GROUP_ID:
+        if buf[i] == FRAME_START and buf[i + 1] in (GROUP_ID, RESP_GROUP_ID):
             start = i - 1
             break
     if start < 0:

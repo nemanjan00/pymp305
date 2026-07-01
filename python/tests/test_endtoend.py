@@ -87,19 +87,36 @@ def test_e2e_read_program_list():
 
 
 def test_e2e_set_output_builds_control():
-    # set_output: read_state -> control(0xC8) -> read_state
+    # set_output does the remote handshake first:
+    #   request_remote (0xC8 remoteCon=2) -> read_state -> control(0xC8 remoteCon=1) -> read_state
     psu = MP305(FakeHID([
+        _resp(P.RESP_CONTROL, b"\x00"),   # remote request granted
         _resp(P.RESP_STATE, _state_payload(setv=500, setc=1000, out=0)),
-        _resp(P.RESP_CONTROL, b"\x00"),
+        _resp(P.RESP_CONTROL, b"\x00"),   # setpoint applied
         _resp(P.RESP_STATE, _state_payload(setv=900, setc=2000, out=1)),
     ]))
     st = psu.set_output(voltage=9.0, current=2.0, on=True)
-    # 2nd write is the 0xC8 control frame
-    ctrl = P.parse_report(psu._dev.written[1])
+    # 1st write requests remote control (remoteCon=2), does not touch setpoints
+    req = P.parse_report(psu._dev.written[0])
+    assert req.cmd == P.CMD_CONTROL and req.payload[0] == 2
+    # 3rd write is the actual 0xC8 setpoint frame (remoteCon=1)
+    ctrl = P.parse_report(psu._dev.written[2])
     assert ctrl.cmd == P.CMD_CONTROL
     rc, sv, sc, rch, vs, co, out, model, refresh = struct.unpack("<BHHBBBBBB", ctrl.payload)
     assert (rc, sv, sc, out) == (1, 900, 2000, 1)     # 9.00V*100, 2.000A*1000, output on
     assert st.output == 1 and abs(st.set_voltage - 9.0) < 1e-9
+    assert psu._remote_held is True
+
+
+def test_e2e_set_output_rejected_without_remote():
+    # if the device refuses remote control (0xC9 status 1), set_output raises
+    from pymp305.device import MP305Error
+    psu = MP305(FakeHID([_resp(P.RESP_CONTROL, b"\x01")]))   # remote request denied
+    try:
+        psu.set_output(voltage=5.0, current=1.0, on=True)
+        assert False, "expected MP305Error"
+    except MP305Error:
+        pass
 
 
 def test_e2e_write_program_request():

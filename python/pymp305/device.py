@@ -126,6 +126,8 @@ class MP305:
         self._dev = device
         self._report_size = report_size
         self.device_name: str | None = None   # "MP305A" / "MP305B", set by hardware_info()
+        self._no_realtime = False              # set if the unit never answers the 0xBD realtime poll
+        self._remote_held = False              # True once the device has granted remote control
 
     # ---- connection ------------------------------------------------------
     @staticmethod
@@ -207,9 +209,18 @@ class MP305:
         return info
 
     def read_state(self, realtime: bool = True, timeout_ms: int = 1500) -> State:
-        """Read the live measurement/state frame (0xC3)."""
-        cmd = P.CMD_REALTIME if realtime else P.CMD_STATE_INFO
-        f = self.request(cmd, P.RESP_STATE, timeout_ms=timeout_ms)
+        """Read the live measurement/state frame (0xC3).
+
+        Some units (observed: MP305B app V1.6) never answer the realtime poll
+        (0xBD); once that is seen we fall back to the stored-state query (0xC2),
+        which returns the same 0xC3 frame, and remember it for later calls."""
+        if realtime and not self._no_realtime:
+            try:
+                f = self.request(P.CMD_REALTIME, P.RESP_STATE, timeout_ms=timeout_ms)
+                return State.parse(f.values, device_name=self.device_name)
+            except MP305Error:
+                self._no_realtime = True   # this unit doesn't answer 0xBD; use 0xC2 from now on
+        f = self.request(P.CMD_STATE_INFO, P.RESP_STATE, timeout_ms=timeout_ms)
         return State.parse(f.values, device_name=self.device_name)
 
     def read_system_settings(self, timeout_ms: int = 1500) -> SystemSettings:
@@ -217,8 +228,32 @@ class MP305:
         return SystemSettings.parse(f.values)
 
     # ---- high-level control ---------------------------------------------
+    # The 0xC8 control command is answered by 0xC9 whose first payload byte is a
+    # status: 0 = accepted, 1 = rejected (this session does not hold remote
+    # control), 2 = pending. Taking control is a two-step handshake, exactly as
+    # ISDT's WebLink does it: first *request* control with remoteCon=2 (the
+    # device grants it and answers status 0), then every subsequent change is
+    # sent with remoteCon=1. A bare remoteCon=1 with no prior request is
+    # rejected (status 1) and silently ignored -- which is why setpoints never
+    # applied before this handshake was added.
     def control(self, cmd: ControlCommand, timeout_ms: int = 1500) -> P.Frame:
         return self.request(P.CMD_CONTROL, P.RESP_CONTROL, cmd.payload(), timeout_ms)
+
+    @staticmethod
+    def _control_status(frame: P.Frame) -> int:
+        return frame.payload[0] if frame.payload else -1
+
+    def request_remote(self, timeout_ms: int = 1500) -> bool:
+        """Request remote control from the device (remoteCon=2). Returns True if
+        granted (0xC9 status 0). Does not change any setpoint."""
+        f = self.control(ControlCommand(remote_con=2), timeout_ms=timeout_ms)
+        self._remote_held = self._control_status(f) == 0
+        return self._remote_held
+
+    def _ensure_remote(self, timeout_ms: int) -> None:
+        if not self._remote_held and not self.request_remote(timeout_ms=timeout_ms):
+            raise MP305Error("device refused remote control (0xC9 status 1) -- "
+                             "is another controller connected, or the panel locked?")
 
     def set_output(self, voltage: float | None = None, current: float | None = None,
                    on: bool | None = None, *, model: int = 0,
@@ -228,6 +263,7 @@ class MP305:
         Unspecified values are read from the current state so they are preserved.
         Returns the fresh state after the change.
         """
+        self._ensure_remote(timeout_ms)
         st = self.read_state(timeout_ms=timeout_ms)
         cmd = ControlCommand(
             remote_con=1,
@@ -240,7 +276,13 @@ class MP305:
             model=model,
             refresh=0,
         )
-        self.control(cmd, timeout_ms=timeout_ms)
+        f = self.control(cmd, timeout_ms=timeout_ms)
+        if self._control_status(f) == 1:        # remote was dropped -- re-acquire once and retry
+            self._remote_held = False
+            self._ensure_remote(timeout_ms)
+            f = self.control(cmd, timeout_ms=timeout_ms)
+        if self._control_status(f) not in (0, 2):
+            raise MP305Error(f"control command rejected (0xC9 status {self._control_status(f)})")
         return self.read_state(timeout_ms=timeout_ms)
 
     def output_on(self, **kw) -> State:
@@ -251,7 +293,9 @@ class MP305:
 
     def release_remote(self, timeout_ms: int = 1500) -> P.Frame:
         """Hand control back to the device's front panel (remoteCon = 0)."""
-        return self.control(ControlCommand(remote_con=0), timeout_ms=timeout_ms)
+        f = self.control(ControlCommand(remote_con=0), timeout_ms=timeout_ms)
+        self._remote_held = False
+        return f
 
     def set_system_settings(self, cmd: SystemSetCommand, timeout_ms: int = 1500) -> P.Frame:
         return self.request(P.CMD_SYS_SET, P.RESP_SYS_SET, cmd.payload(), timeout_ms)
