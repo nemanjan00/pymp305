@@ -17,6 +17,7 @@ from collections import deque
 import pyqtgraph as pg
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QRectF, QTimer, QPointF, QObject, QVariantAnimation, QEasingCurve,
+    QMetaObject,
 )
 from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
@@ -1065,8 +1066,15 @@ class MainWindow(QWidget):
         self._sync = False
 
     def closeEvent(self, e):
+        # Run the disconnect (which turns output off + releases remote back to the front
+        # panel) synchronously in the worker thread BEFORE quitting it — a queued
+        # reqDisconnect would be dropped when the thread's event loop stops.
         try:
-            self.reqDisconnect.emit(); self.thread.quit(); self.thread.wait(800)
+            if getattr(self, "thread", None) is not None and self.thread.isRunning():
+                if getattr(self, "_connected", False):
+                    QMetaObject.invokeMethod(self.worker, "disconnect_device",
+                                             Qt.ConnectionType.BlockingQueuedConnection)
+                self.thread.quit(); self.thread.wait(3000)
         except Exception:
             pass
         e.accept()
