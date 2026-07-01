@@ -776,8 +776,9 @@ class MainWindow(QWidget):
         self.pd_out_btn = OutputButton("⚡   PD OUTPUT ON", "⚡   ENABLE PD OUTPUT")
         self.pd_out_btn.toggled.connect(self._on_pd_output)
         v.addWidget(self.pd_out_btn)
-        self.pd_prof_lbl = QLabel("source profile: —  (set on device)")
-        self.pd_prof_lbl.setFont(mono(12, bold=False)); self.pd_prof_lbl.setStyleSheet(f"color:{C['muted']};")
+        self.pd_prof_lbl = QLabel("source profile: —  ·  set on device")
+        self.pd_prof_lbl.setFont(mono(11, bold=False)); self.pd_prof_lbl.setStyleSheet(f"color:{C['muted']};")
+        self.pd_prof_lbl.setWordWrap(True)
         v.addWidget(self.pd_prof_lbl)
         v.addWidget(_lab("ADVERTISED  ·  tap to toggle  ·  yellow = negotiated", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
@@ -797,7 +798,7 @@ class MainWindow(QWidget):
         self.prog_btn = OutputButton("■   RUNNING  ·  STOP", "▶   START SEQUENCE")
         self.prog_btn.toggled.connect(self._on_program)
         v.addWidget(self.prog_btn)
-        hdr = QHBoxLayout(); hdr.addWidget(_lab("SEQUENCE  ·  tap a value to edit", "cardTitle")); hdr.addStretch(1)
+        hdr = QHBoxLayout(); hdr.addWidget(_lab("SEQUENCE  ·  tap to edit", "cardTitle")); hdr.addStretch(1)
         self.prog_write_btn = QPushButton("⤓ write to device"); self.prog_write_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prog_write_btn.clicked.connect(self._on_write_program); hdr.addWidget(self.prog_write_btn)
         v.addLayout(hdr)
@@ -1192,7 +1193,7 @@ class MainWindow(QWidget):
             for i, item in enumerate(pdos):     # keep labels fresh (values), not toggle state
                 self._pdo_btns[i].setText(item["label"])
         self._emark_lab.setText(str(st.get("emarker", "—")))
-        self.pd_prof_lbl.setText(f"source profile:  {st.get('pd_profile', '—')}   ·  set on device")
+        self.pd_prof_lbl.setText(f"source profile:  {st.get('pd_profile', '—')}  ·  set on device")
         # mark the advertised voltage a sink has negotiated (measured output) in yellow
         neg_v = st.get("voltage", 0.0) if st.get("output") else 0.0
         pv = getattr(self, "_pdo_v", [])

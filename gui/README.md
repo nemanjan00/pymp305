@@ -30,13 +30,16 @@ so the left column is controls (cards), the right column is read-outs (flat).
 
 **Modes** (tabs, top-left) mirror the device — it runs one mode at a time (its `model`):
 - **DC PSU** — the controls below (output, V/I, over-current, presets).
+- **Program** — a timed DC sequence (V / I / seconds per step): tap any value to edit, add/delete
+  steps, and **write to device**; a start/stop button runs it.
 - **Charge** — chemistry, cells, charge current, and a start/stop button (charging an external pack).
-- **USB-PD** — tap a PD profile (5 / 9 / 12 / 15 / 20 V) to request it; the USB-C **e-marker**
-  (attached-cable info) shows read-only.
+- **USB-PD** — toggle which PD source profiles (5 / 9 / 12 / 15 / 20 V…) the device advertises;
+  the profile a sink negotiates is marked in **yellow**. The active **W profile** is set on the
+  device (read-only here), and the USB-C **e-marker** (attached-cable info) shows read-only.
 
-| Charge mode | USB-PD mode |
-|:---:|:---:|
-| ![charge mode](./charge-mode.png) | ![usb-pd mode](./usbpd-mode.png) |
+| Program mode | Charge mode | USB-PD mode |
+|:---:|:---:|:---:|
+| ![program mode](./program-mode.png) | ![charge mode](./charge-mode.png) | ![usb-pd mode](./usbpd-mode.png) |
 
 Left — DC-mode controls:
 - **Output** — one big green/red card-button (huge hit target; state unmistakable). It *is*
