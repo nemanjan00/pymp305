@@ -39,9 +39,13 @@ def annotate_emark(em: dict) -> dict:
     return out
 
 
-def _u8(b, i):  return b[i]
-def _u16(b, i): return b[i] | (b[i + 1] << 8)
-def _u32(b, i): return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)
+# Reads past the end return 0, mirroring WebLink's JS parsers where an
+# out-of-range `cmd[i]` is `undefined` and `undefined & 0xFF === 0`. Real
+# device frames are sometimes shorter than the maximal layout (e.g. the 0xDF
+# program-state frame with no e-marked cable), so indexing must not throw.
+def _u8(b, i):  return b[i] if 0 <= i < len(b) else 0
+def _u16(b, i): return _u8(b, i) | (_u8(b, i + 1) << 8)
+def _u32(b, i): return _u8(b, i) | (_u8(b, i + 1) << 8) | (_u8(b, i + 2) << 16) | (_u8(b, i + 3) << 24)
 
 
 # Non-MP305B devices (e.g. MP305A) remap a few low error bits — from constant.js getByteType.
