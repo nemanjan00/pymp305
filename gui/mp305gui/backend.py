@@ -185,7 +185,7 @@ class RealBackend:
         # WebLink: update=1 => changing the advertised set; update=0 => just toggling output.
         from pymp305 import commands as C
         mask = int(mask) | 1                    # 5 V (bit 0) is always advertised
-        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=mask,
+        self._psu.pdo_connect(C.PDOConnect(remote_con=1, src_enable_mask=mask,
                                            update=1 if update else 0, output=1 if output else 0))
         self._pd_mask = mask; self._pd_output = 1 if output else 0
         for i, it in enumerate(getattr(self, "_pdo_items", [])):   # optimistic local reflect

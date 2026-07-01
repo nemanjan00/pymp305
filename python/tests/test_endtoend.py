@@ -185,11 +185,11 @@ def test_e2e_pdo_connect_request():
         _resp(P.RESP_CONTROL, b"\x00"),       # remote request granted
         _resp(P.RESP_PDO_CONNECT, b"\x00"),   # pdo connect accepted
     ]))
-    psu.pdo_connect(C.PDOConnect(pdo_index=2, output=1))
+    psu.pdo_connect(C.PDOConnect(src_enable_mask=2, output=1))
     req = P.parse_report(psu._dev.written[0])
     assert req.cmd == P.CMD_CONTROL and req.payload[0] == 2    # remote request
     f = P.parse_report(psu._dev.written[1])
-    assert f.cmd == 0xE8 and f.payload[1] == 2     # pdo_index low byte
+    assert f.cmd == 0xE8 and f.payload[1] == 2     # src_enable_mask low byte
 
 
 if __name__ == "__main__":

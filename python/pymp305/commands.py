@@ -30,15 +30,23 @@ def programmable_read(seq_id: int):
 
 @dataclass
 class PDOConnect:
-    """0xE8 — select/apply a USB-PD profile. -> 0xE9."""
+    """0xE8 — USB-PD source connect/control (NOT a profile selector). -> 0xE9.
+
+    `src_enable_mask` is a **bitmask of which PDO items in the active profile are
+    advertised/live** (bit i = item i), matching WebLink's `pdoIndex` (built from
+    each item's `type`) and the Android app. It does NOT select a stored profile —
+    there is no remote "set active profile" command (read via 0xE4/0xD0; rewrite a
+    profile with 0xD2; pick the active one on the device). `update=1` changes the
+    advertised set; `update=0` is a plain output toggle.
+    """
     remote_con: int = 1
-    pdo_index: int = 0
+    src_enable_mask: int = 0
     update: int = 0
     output: int = 0
     model: int = 2          # USB-PD
     def build(self):
         return (0xE8, struct.pack("<BHBBB", self.remote_con & 0xFF,
-                                  self.pdo_index & 0xFFFF, self.update & 0xFF,
+                                  self.src_enable_mask & 0xFFFF, self.update & 0xFF,
                                   self.output & 0xFF, self.model & 0xFF))
 
 
