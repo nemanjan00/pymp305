@@ -22,8 +22,14 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   as USB's `0x12`/`0x21`, but the BLE bridge is address 3). `parse_ble_notification` matched
   only `0x12`, so every BLE state/settings response was misparsed. Now accepts `0x31`.
   Verified on an MP305B: connect → touch-accept bind → `hardware_info`/`read_state`/
-  `read_system_settings` all decode over Bluetooth. (BLE *control* is not yet confirmed —
-  `remoteCon=2` is unanswered over BLE; remote control likely must be enabled on the device.)
+  `read_system_settings` all decode over Bluetooth.
+- **BLE control works, gated by on-device confirmation.** Over BLE the remote-control request
+  (`remoteCon=2`) is answered only after the user accepts an "allow remote control" prompt on
+  the MP305 touch screen (wireless-safety gating; USB auto-grants). Once accepted, control
+  works: verified `remoteCon=2` → status 0, then set 5 V/0.5 A → real 5.000 V / 13 mA into a
+  390 Ω load. `MP305BLE.set_output()` now performs the two-step handshake (added
+  `request_remote()`/`_ensure_remote()` with a long default timeout for the touch prompt) and a
+  `current_over` parameter, mirroring the USB driver.
 - **CV/CC regulation status was inverted.** `outState` is `1 = CV, 2 = CC` on real hardware
   (measured with a 390 Ω load); the GUI and simulator had it backwards, so the dashboard
   labelled CV as CC. Fixed the GUI, the sim backend, and PROTOCOL.md.

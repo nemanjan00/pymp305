@@ -60,6 +60,7 @@ class MP305BLE:
         self.device_name = _model_from_name(device_name)
         self.hardware: HardwareInfo | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
+        self._remote_held = False
 
     # ---- discovery / connection -----------------------------------------
     @staticmethod
@@ -212,9 +213,24 @@ class MP305BLE:
     async def control(self, cmd: ControlCommand, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_CONTROL, P.RESP_CONTROL, cmd.payload(), timeout)
 
+    async def request_remote(self, timeout: float = 45.0) -> bool:
+        """Request remote control (remoteCon=2). Over BLE this is gated by an
+        on-device confirmation -- the MP305 shows an "allow remote control" prompt
+        that must be accepted on its touch screen, hence the long default timeout.
+        Returns True if granted (0xC9 status 0)."""
+        f = await self.control(ControlCommand(remote_con=2), timeout=timeout)
+        self._remote_held = (f.payload[0] if f.payload else -1) == 0
+        return self._remote_held
+
+    async def _ensure_remote(self, timeout: float) -> None:
+        if not self._remote_held and not await self.request_remote(timeout=max(timeout, 45.0)):
+            raise MP305Error("device refused remote control over BLE -- accept the "
+                             "'remote control' prompt on the MP305 touch screen")
+
     async def set_output(self, voltage: float | None = None, current: float | None = None,
-                         on: bool | None = None, *, model: int = 0,
+                         on: bool | None = None, *, model: int = 0, current_over: int | None = None,
                          real_change: int = 3, timeout: float = 2.0) -> State:
+        await self._ensure_remote(timeout)
         st = await self.read_state(timeout=timeout)
         cmd = ControlCommand(
             remote_con=1,
@@ -222,11 +238,15 @@ class MP305BLE:
             set_current=st.set_current if current is None else current,
             real_change=real_change,
             voltage_slow=st.voltage_slow,
-            current_over=st.current_over,
+            current_over=st.current_over if current_over is None else current_over,
             output=st.output if on is None else (1 if on else 0),
             model=model, refresh=0,
         )
-        await self.control(cmd, timeout=timeout)
+        f = await self.control(cmd, timeout=timeout)
+        if (f.payload[0] if f.payload else -1) == 1:        # remote dropped -- re-acquire once
+            self._remote_held = False
+            await self._ensure_remote(timeout)
+            await self.control(cmd, timeout=timeout)
         return await self.read_state(timeout=timeout)
 
     async def output_on(self, **kw) -> State:
@@ -236,7 +256,9 @@ class MP305BLE:
         return await self.set_output(on=False, **kw)
 
     async def release_remote(self, timeout: float = 2.0) -> P.Frame:
-        return await self.control(ControlCommand(remote_con=0), timeout=timeout)
+        f = await self.control(ControlCommand(remote_con=0), timeout=timeout)
+        self._remote_held = False
+        return f
 
     async def set_system_settings(self, cmd: SystemSetCommand, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_SYS_SET, P.RESP_SYS_SET, cmd.payload(), timeout)
