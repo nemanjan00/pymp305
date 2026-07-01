@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 
 from .theme import C, STYLESHEET
 from .worker import DeviceWorker
-from .backend import make_backend, SimBackend, CHEMS, MODE_DC, MODE_PD, MODE_CHARGE
+from .backend import make_backend, SimBackend, CHEMS, MODE_DC, MODE_PROG, MODE_PD, MODE_CHARGE
 
 WINDOW = 60.0
 MONO = ["JetBrains Mono", "IBM Plex Mono", "DejaVu Sans Mono", "Consolas", "monospace"]
@@ -589,7 +589,7 @@ class MainWindow(QWidget):
     reqV = pyqtSignal(float); reqA = pyqtSignal(float); reqOut = pyqtSignal(bool)
     reqCurrentOver = pyqtSignal(int); reqRemote = pyqtSignal(bool)
     reqMode = pyqtSignal(int); reqCharge = pyqtSignal(dict); reqCharging = pyqtSignal(bool)
-    reqSelectPDO = pyqtSignal(int); reqPdOutput = pyqtSignal(bool)
+    reqSelectPDO = pyqtSignal(int); reqPdOutput = pyqtSignal(bool); reqProgram = pyqtSignal(bool)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -685,7 +685,8 @@ class MainWindow(QWidget):
         tabs = QHBoxLayout(); tabs.setSpacing(6)
         self._mode_grp = QButtonGroup(self); self._mode_grp.setExclusive(True)
         self._mode_tabs = {}
-        for label, model, page in (("DC PSU", MODE_DC, 0), ("Charge", MODE_CHARGE, 1), ("USB-PD", MODE_PD, 2)):
+        for label, model, page in (("DC PSU", MODE_DC, 0), ("Program", MODE_PROG, 3),
+                                   ("Charge", MODE_CHARGE, 1), ("USB-PD", MODE_PD, 2)):
             b = QPushButton(label); b.setProperty("class", "tab"); b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _, m=model, p=page: self._switch_mode(m, p))
@@ -696,6 +697,7 @@ class MainWindow(QWidget):
         self.stack.addWidget(self._dc_page())          # 0
         self.stack.addWidget(self._charge_page())      # 1
         self.stack.addWidget(self._pd_page())          # 2
+        self.stack.addWidget(self._program_page())     # 3  (model 1)
         v.addWidget(self.stack, 1)
         self._set_enabled(False)
         return col
@@ -771,7 +773,7 @@ class MainWindow(QWidget):
     def _pd_page(self):
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
         self.pd_out_btn = OutputButton("⚡   PD OUTPUT ON", "⚡   ENABLE PD OUTPUT")
-        self.pd_out_btn.toggled.connect(lambda on: None if self._sync else self.reqPdOutput.emit(on))
+        self.pd_out_btn.toggled.connect(self._on_pd_output)
         v.addWidget(self.pd_out_btn)
         v.addWidget(_lab("ADVERTISED PROFILES  ·  tap to toggle", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
@@ -784,6 +786,41 @@ class MainWindow(QWidget):
         self._emark_lab.setStyleSheet(f"color:{C['curr']};"); self._emark_lab.setWordWrap(True)
         eml.addWidget(self._emark_lab); v.addWidget(em)
         return page
+
+    # ---- Programmable (timed DC steps) mode ------------------------------
+    def _program_page(self):
+        page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
+        self.prog_btn = OutputButton("■   RUNNING  ·  STOP", "▶   START SEQUENCE")
+        self.prog_btn.toggled.connect(self._on_program)
+        v.addWidget(self.prog_btn)
+        self.prog_name_lbl = _lab("SEQUENCE", "cardTitle"); v.addWidget(self.prog_name_lbl)
+        self._prog_wrap = QVBoxLayout(); self._prog_wrap.setSpacing(6); v.addLayout(self._prog_wrap)
+        self._prog_lbls = []
+        v.addStretch(1)
+        return page
+
+    def _on_program(self, on):
+        if self._sync:
+            return
+        self.reqProgram.emit(on)
+        self._logline(f"sequence {'started' if on else 'stopped'}", C["on"] if on else C["muted"])
+
+    def _prog_row_css(self, active):
+        if active:
+            return (f"background:{C['accent']};color:{C['panel']};border:none;"
+                    f"border-radius:8px;padding:7px 13px;font-weight:800;")
+        return (f"background:{C['card_hi']};color:{C['text']};border:1px solid {C['stroke']};"
+                f"border-radius:8px;padding:7px 13px;")
+
+    def _rebuild_program(self, steps):
+        for l in self._prog_lbls:
+            l.setParent(None)
+        self._prog_lbls = []
+        for i, (vv, aa, ss) in enumerate(steps):
+            lbl = QLabel(f"{i + 1}.    {vv:g} V   ·   {aa:g} A   ·   {ss:g} s")
+            lbl.setFixedHeight(36); lbl.setFont(mono(13, bold=False))
+            lbl.setStyleSheet(self._prog_row_css(False))
+            self._prog_wrap.addWidget(lbl); self._prog_lbls.append(lbl)
 
     _PDO_TOGGLE_CSS = (
         "QPushButton{{background:{card};border:1px solid {stroke};border-radius:9px;"
@@ -817,12 +854,19 @@ class MainWindow(QWidget):
             if i == 0 or b.isChecked():
                 mask |= (1 << i)
         self.reqSelectPDO.emit(mask)
+        self._logline(f"USB-PD advertise set → 0x{mask:02X}", C["accent"])
+
+    def _on_pd_output(self, on):
+        if self._sync:
+            return
+        self.reqPdOutput.emit(on)
+        self._logline(f"USB-PD output {'ON' if on else 'OFF'}", C["on"] if on else C["muted"])
 
     def _switch_mode(self, model, page):
         self.stack.setCurrentIndex(page)
         if not self._sync:
             self.reqMode.emit(model)
-            self._logline(f"mode → {['DC PSU', '', 'USB-PD', 'Charge'][model]}", C["accent"])
+            self._logline(f"mode → {['DC PSU', 'Program', 'USB-PD', 'Charge'][model]}", C["accent"])
 
     def _right_column(self):
         col = QVBoxLayout(); col.setSpacing(14)
@@ -924,6 +968,7 @@ class MainWindow(QWidget):
         self.reqMode.connect(self.worker.set_mode); self.reqCharge.connect(self.worker.set_charge)
         self.reqCharging.connect(self.worker.set_charging); self.reqSelectPDO.connect(self.worker.select_pdo)
         self.reqPdOutput.connect(self.worker.set_pd_output)
+        self.reqProgram.connect(self.worker.run_program)
         self.thread.start()
 
     # ---- helpers
@@ -1082,13 +1127,22 @@ class MainWindow(QWidget):
         pdos = st.get("pdos", [])
         if len(self._pdo_btns) != len(pdos):
             self._rebuild_pdos(pdos)
+            self.pd_out_btn.setChecked(bool(st.get("output", 0)))   # seed once on entering PD
         elif pdos:
             for i, item in enumerate(pdos):     # keep labels fresh (values), not toggle state
                 self._pdo_btns[i].setText(item["label"])
-        pd_on = bool(st.get("output", 0))
-        if self.pd_out_btn.isChecked() != pd_on:
-            self.pd_out_btn.setChecked(pd_on)
         self._emark_lab.setText(str(st.get("emarker", "—")))
+        # Program panel: step list, current step highlighted, run state on the button
+        steps = st.get("program_steps", [])
+        if len(self._prog_lbls) != len(steps):
+            self._rebuild_program(steps)
+        name = st.get("program_name", "")
+        self.prog_name_lbl.setText(f"SEQUENCE  ·  {name}" if name else "SEQUENCE")
+        running = bool(st.get("program_running", False)); idx = st.get("program_index", 0)
+        for i, lbl in enumerate(self._prog_lbls):
+            lbl.setStyleSheet(self._prog_row_css(running and i == idx))
+        if self.prog_btn.isChecked() != running:
+            self.prog_btn.setChecked(running)
         self._sync = False
 
     def closeEvent(self, e):

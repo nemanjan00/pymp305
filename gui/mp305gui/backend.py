@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "python"))
 
 # operating modes (the device's `model` field): mutually exclusive
-MODE_DC, MODE_PD, MODE_CHARGE = 0, 2, 3
+MODE_DC, MODE_PROG, MODE_PD, MODE_CHARGE = 0, 1, 2, 3
 CHEMS = ["LiHv", "LiPo", "LiFe", "Li-ion", "NiMH", "NiCd", "Pb"]
 def _pdo_label(it: dict) -> str:
     """WebLink-style label for a decoded PDO item (fixed voltage, APDO/AVS range)."""
@@ -106,7 +106,36 @@ class RealBackend:
                 d["charge_pct"] = 0; d["charging_ext"] = False
         else:
             d["charge_pct"] = 0; d["charging_ext"] = False
+        name, steps = self._prog_caps()
+        d["program_name"] = name; d["program_steps"] = steps
+        if st.model == MODE_PROG:
+            try:
+                ps = self._psu.read_program_state()
+                d["program_index"] = ps.working_index; d["program_running"] = (ps.is_stop == 0)
+            except Exception:
+                d["program_index"] = 0; d["program_running"] = False
+        else:
+            d["program_index"] = 0; d["program_running"] = False
         return d
+
+    def _prog_caps(self):
+        # stored sequence (name + steps) is static — read once, cache
+        if not hasattr(self, "_prog_steps"):
+            self._prog_name = ""; self._prog_steps = []
+            try:
+                pl = self._psu.read_program_list()
+                if pl.entries:
+                    e = pl.entries[0]; self._prog_name = e.name
+                    ps = self._psu.read_program_steps(1, e.num)   # first stored sequence (id 1)
+                    self._prog_steps = [(s["V"], s["A"], s["S"]) for s in ps.steps]
+            except Exception:
+                pass
+        return self._prog_name, self._prog_steps
+
+    def program_run(self, on):
+        from pymp305 import commands as C
+        self._psu.program_connect(C.ProgramConnect(remote_con=1, program_control=2,
+                                                   output=1 if on else 0, model=1))
 
     def _caps(self):
         # cable + PDO list don't change live — read once, cache.
@@ -146,24 +175,25 @@ class RealBackend:
             remote_con=1, battery_type=getattr(self, "_chem", 0), cells=getattr(self, "_cells", 1),
             current=getattr(self, "_charge_a", 0.0), output=1 if on else 0))
 
-    def _pd_apply(self, mask, output):
+    def _pd_apply(self, mask, output, update):
+        # WebLink: update=1 => changing the advertised set; update=0 => just toggling output.
         from pymp305 import commands as C
         mask = int(mask) | 1                    # 5 V (bit 0) is always advertised
-        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=mask, update=1,
-                                           output=1 if output else 0))
+        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=mask,
+                                           update=1 if update else 0, output=1 if output else 0))
         self._pd_mask = mask; self._pd_output = 1 if output else 0
         for i, it in enumerate(getattr(self, "_pdo_items", [])):   # optimistic local reflect
             it["type"] = bool(mask >> i & 1)
 
     def select_pdo(self, bitmask):
         # advertise-set changed (auto-apply from the toggles); keep the current output state
-        self._pd_apply(bitmask, getattr(self, "_pd_output", 0))
+        self._pd_apply(bitmask, getattr(self, "_pd_output", 0), update=1)
 
     def set_pd_output(self, on):
         mask = getattr(self, "_pd_mask", None)
         if mask is None:
             mask = sum(1 << i for i, it in enumerate(getattr(self, "_pdo_items", [])) if it.get("type"))
-        self._pd_apply(mask, on)
+        self._pd_apply(mask, on, update=0)      # output toggle → updateBool=0
 
     def set_current_over(self, mode):
         # CC (0) / OCP (1); set_output does the remote handshake and preserves V/I/output
@@ -208,6 +238,8 @@ class SimBackend:
         self.chem = 1; self.cells = 3; self.charge_a = 1.0; self.charging_ext = False
         self.cbatt = 30.0          # % of the external battery being charged
         self.sim_pdos = [dict(x) for x in SIM_PDOS]   # advertised PD source set (checkable)
+        self.prog_steps = [(3.3, 1.0, 5.0), (5.0, 1.0, 5.0), (9.0, 1.0, 5.0), (12.0, 1.0, 5.0)]
+        self.prog_running = False; self.prog_index = 0; self.prog_t = 0.0
         self._t0 = time.monotonic()
         self._last = self._t0
         self._n = 0
@@ -241,6 +273,11 @@ class SimBackend:
 
     def set_pd_output(self, on):
         self.on = bool(on)
+
+    def program_run(self, on):
+        self.prog_running = bool(on); self.on = bool(on)
+        if on:
+            self.prog_index = 0; self.prog_t = 0.0
 
     def _charge_step(self, dt):
         if not self.charging_ext or self.cbatt >= 100.0:
@@ -276,6 +313,20 @@ class SimBackend:
                 out_state = 2 if i >= pa - 1e-9 else 1
             else:
                 voltage = current = 0.0
+        elif self.mode == MODE_PROG:                 # programmed DC: step through the sequence
+            if self.prog_running and self.prog_steps:
+                self.prog_t += dt
+                if self.prog_t >= self.prog_steps[self.prog_index][2]:
+                    self.prog_t = 0.0
+                    self.prog_index = (self.prog_index + 1) % len(self.prog_steps)   # loop
+                sv, sa, _ = self.prog_steps[self.prog_index]
+                i_cv = sv / self.load
+                if i_cv > sa + 1e-9:
+                    current = sa; voltage = sa * self.load; out_state = 2
+                else:
+                    voltage = sv; current = i_cv; out_state = 1
+            else:
+                voltage = current = 0.0
         else:                                        # DC PSU
             if self.on:
                 i_cv = self.set_v / self.load        # current the load would draw at set V
@@ -307,6 +358,9 @@ class SimBackend:
             "errors": ["errorDcOutOCP"] if self._ocp_trip else [],
             "mode": "CC" if out_state == 2 else "CV",
             "emarker": SIM_EMARKER, "pdos": _pdo_view(self.sim_pdos),
+            "program_name": "Sequence", "program_steps": self.prog_steps,
+            "program_index": self.prog_index if self.prog_running else 0,
+            "program_running": self.prog_running,
             "chem": self.chem, "cells": self.cells, "charge_current": self.charge_a,
             "charging_ext": self.charging_ext, "charge_pct": int(round(self.cbatt)),
         }

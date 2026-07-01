@@ -102,6 +102,10 @@ class DeviceWorker(QObject):
     def set_pd_output(self, on: bool):
         self._call("set_pd_output", on)
 
+    @pyqtSlot(bool)
+    def run_program(self, on: bool):
+        self._call("program_run", on)
+
     def _call(self, method: str, *args):
         if not self._live:
             return
