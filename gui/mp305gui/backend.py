@@ -108,9 +108,9 @@ class RealBackend:
                 d["charge_pct"] = 0; d["charging_ext"] = False
         else:
             d["charge_pct"] = 0; d["charging_ext"] = False
-        name, steps = self._prog_caps()
-        d["program_name"] = name; d["program_steps"] = steps
         if st.model == MODE_PROG:
+            name, steps = self._prog_caps()     # read the stored sequence only in program mode
+            d["program_name"] = name; d["program_steps"] = steps
             try:
                 ps = self._psu.read_program_state()
                 # device working_index is 1-based; the GUI highlights a 0-based row
@@ -119,6 +119,8 @@ class RealBackend:
             except Exception:
                 d["program_index"] = 0; d["program_running"] = False
         else:
+            d["program_name"] = getattr(self, "_prog_name", "")
+            d["program_steps"] = getattr(self, "_prog_steps", [])
             d["program_index"] = 0; d["program_running"] = False
         return d
 
