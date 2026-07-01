@@ -112,7 +112,9 @@ class RealBackend:
         if st.model == MODE_PROG:
             try:
                 ps = self._psu.read_program_state()
-                d["program_index"] = ps.working_index; d["program_running"] = (ps.is_stop == 0)
+                # device working_index is 1-based; the GUI highlights a 0-based row
+                d["program_index"] = max(0, ps.working_index - 1)
+                d["program_running"] = (ps.is_stop == 0)
             except Exception:
                 d["program_index"] = 0; d["program_running"] = False
         else:
