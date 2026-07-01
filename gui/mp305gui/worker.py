@@ -98,6 +98,10 @@ class DeviceWorker(QObject):
     def select_pdo(self, i: int):
         self._call("select_pdo", i)
 
+    @pyqtSlot(bool)
+    def set_pd_output(self, on: bool):
+        self._call("set_pd_output", on)
+
     def _call(self, method: str, *args):
         if not self._live:
             return

@@ -23,7 +23,6 @@ from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
     QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup,
-    QCheckBox,
 )
 
 from .theme import C, STYLESHEET
@@ -590,7 +589,7 @@ class MainWindow(QWidget):
     reqV = pyqtSignal(float); reqA = pyqtSignal(float); reqOut = pyqtSignal(bool)
     reqCurrentOver = pyqtSignal(int); reqRemote = pyqtSignal(bool)
     reqMode = pyqtSignal(int); reqCharge = pyqtSignal(dict); reqCharging = pyqtSignal(bool)
-    reqSelectPDO = pyqtSignal(int)
+    reqSelectPDO = pyqtSignal(int); reqPdOutput = pyqtSignal(bool)
 
     def __init__(self, prefer_real=True):
         super().__init__()
@@ -771,13 +770,12 @@ class MainWindow(QWidget):
 
     def _pd_page(self):
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
-        v.addWidget(_lab("USB-PD PROFILES  ·  advertise (tick to offer)", "cardTitle"))
+        self.pd_out_btn = OutputButton("⚡   PD OUTPUT ON", "⚡   ENABLE PD OUTPUT")
+        self.pd_out_btn.toggled.connect(lambda on: None if self._sync else self.reqPdOutput.emit(on))
+        v.addWidget(self.pd_out_btn)
+        v.addWidget(_lab("ADVERTISED PROFILES  ·  tap to toggle", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
-        self._pdo_checks = []
-        self._pdo_apply = QPushButton("Apply advertised set"); self._pdo_apply.setFixedHeight(38)
-        self._pdo_apply.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pdo_apply.clicked.connect(self._apply_pdos)
-        v.addWidget(self._pdo_apply)
+        self._pdo_btns = []
         v.addStretch(1)
         em = QFrame(); em.setFixedHeight(58)        # flat: e-marker is read-only cable info
         eml = QVBoxLayout(em); eml.setContentsMargins(2, 8, 2, 0); eml.setSpacing(4)
@@ -787,26 +785,38 @@ class MainWindow(QWidget):
         eml.addWidget(self._emark_lab); v.addWidget(em)
         return page
 
+    _PDO_TOGGLE_CSS = (
+        "QPushButton{{background:{card};border:1px solid {stroke};border-radius:9px;"
+        "font-weight:700;padding:9px;text-align:left;padding-left:14px;color:{text};}}"
+        "QPushButton:hover{{background:{hover};}}"
+        "QPushButton:checked{{background:{accent};color:{panel};border:none;}}"
+        "QPushButton:disabled{{background:{accent};color:{panel};border:none;}}"
+    )
+
     def _rebuild_pdos(self, pdos):
-        for cb in self._pdo_checks:
-            cb.setParent(None)
-        self._pdo_checks = []
+        for b in self._pdo_btns:
+            b.setParent(None)
+        self._pdo_btns = []
+        css = self._PDO_TOGGLE_CSS.format(card=C['card_hi'], stroke=C['stroke'], hover=C['hover'],
+                                          accent=C['accent'], panel=C['panel'], text=C['text'])
         for i, item in enumerate(pdos):
-            cb = QCheckBox(item["label"]); cb.setChecked(bool(item["checked"]))
+            b = QPushButton(item["label"]); b.setCheckable(True); b.setFixedHeight(40)
+            b.setChecked(bool(item["checked"])); b.setStyleSheet(css)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             if i == 0:                    # the 5 V fixed PDO is mandatory for a PD source
-                cb.setChecked(True); cb.setEnabled(False)
-            cb.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._pdo_wrap.addWidget(cb); self._pdo_checks.append(cb)
+                b.setChecked(True); b.setEnabled(False)
+            else:
+                b.toggled.connect(lambda _=False: self._apply_pdos())   # auto-apply on toggle
+            self._pdo_wrap.addWidget(b); self._pdo_btns.append(b)
 
     def _apply_pdos(self):
         if self._sync:
             return
         mask = 0
-        for i, cb in enumerate(self._pdo_checks):
-            if i == 0 or cb.isChecked():
+        for i, b in enumerate(self._pdo_btns):
+            if i == 0 or b.isChecked():
                 mask |= (1 << i)
         self.reqSelectPDO.emit(mask)
-        self._logline(f"USB-PD advertise set → 0x{mask:02X}", C["accent"])
 
     def _switch_mode(self, model, page):
         self.stack.setCurrentIndex(page)
@@ -913,6 +923,7 @@ class MainWindow(QWidget):
         self.reqRemote.connect(self.worker.set_remote)
         self.reqMode.connect(self.worker.set_mode); self.reqCharge.connect(self.worker.set_charge)
         self.reqCharging.connect(self.worker.set_charging); self.reqSelectPDO.connect(self.worker.select_pdo)
+        self.reqPdOutput.connect(self.worker.set_pd_output)
         self.thread.start()
 
     # ---- helpers
@@ -1066,14 +1077,17 @@ class MainWindow(QWidget):
             self.chg_stat.setText(f"{pct}%   ·   {st['voltage']:.1f} V   ·   {st['current']:.2f} A")
         else:
             self.chg_stat.setText(f"{pct}%   ·   idle" if model == MODE_CHARGE else "idle")
-        # USB-PD panel: checkbox advertise-set. Only (re)seed checked state when the row
-        # set changes — don't overwrite the user's in-progress ticks on every poll.
+        # USB-PD panel: toggle-button advertise-set. Only (re)seed on/off when the row set
+        # changes — don't overwrite the user's in-progress toggles on every poll.
         pdos = st.get("pdos", [])
-        if len(self._pdo_checks) != len(pdos):
+        if len(self._pdo_btns) != len(pdos):
             self._rebuild_pdos(pdos)
         elif pdos:
-            for i, item in enumerate(pdos):     # keep labels fresh (values), not checked state
-                self._pdo_checks[i].setText(item["label"])
+            for i, item in enumerate(pdos):     # keep labels fresh (values), not toggle state
+                self._pdo_btns[i].setText(item["label"])
+        pd_on = bool(st.get("output", 0))
+        if self.pd_out_btn.isChecked() != pd_on:
+            self.pd_out_btn.setChecked(pd_on)
         self._emark_lab.setText(str(st.get("emarker", "—")))
         self._sync = False
 

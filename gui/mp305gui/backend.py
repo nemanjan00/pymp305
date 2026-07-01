@@ -146,13 +146,24 @@ class RealBackend:
             remote_con=1, battery_type=getattr(self, "_chem", 0), cells=getattr(self, "_cells", 1),
             current=getattr(self, "_charge_a", 0.0), output=1 if on else 0))
 
-    def select_pdo(self, bitmask):
-        # bitmask = which advertised PDOs are enabled (bit i = item i); WebLink's pdoIndex.
+    def _pd_apply(self, mask, output):
         from pymp305 import commands as C
-        bitmask = int(bitmask)
-        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=bitmask, update=1, output=1))
+        mask = int(mask) | 1                    # 5 V (bit 0) is always advertised
+        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=mask, update=1,
+                                           output=1 if output else 0))
+        self._pd_mask = mask; self._pd_output = 1 if output else 0
         for i, it in enumerate(getattr(self, "_pdo_items", [])):   # optimistic local reflect
-            it["type"] = bool(bitmask >> i & 1)
+            it["type"] = bool(mask >> i & 1)
+
+    def select_pdo(self, bitmask):
+        # advertise-set changed (auto-apply from the toggles); keep the current output state
+        self._pd_apply(bitmask, getattr(self, "_pd_output", 0))
+
+    def set_pd_output(self, on):
+        mask = getattr(self, "_pd_mask", None)
+        if mask is None:
+            mask = sum(1 << i for i, it in enumerate(getattr(self, "_pdo_items", [])) if it.get("type"))
+        self._pd_apply(mask, on)
 
     def set_current_over(self, mode):
         # CC (0) / OCP (1); set_output does the remote handshake and preserves V/I/output
@@ -227,6 +238,9 @@ class SimBackend:
         bitmask = int(bitmask)
         for i, it in enumerate(self.sim_pdos):
             it["type"] = (i == 0) or bool(bitmask >> i & 1)   # 5 V always advertised
+
+    def set_pd_output(self, on):
+        self.on = bool(on)
 
     def _charge_step(self, dt):
         if not self.charging_ext or self.cbatt >= 100.0:
