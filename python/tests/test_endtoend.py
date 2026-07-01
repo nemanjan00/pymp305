@@ -119,6 +119,24 @@ def test_e2e_set_output_rejected_without_remote():
         pass
 
 
+def test_e2e_set_mode_switch():
+    # switch DC(0) -> USB-PD(2): read_state, request remote (via current mode 0xC8),
+    # switch (0xC8 with new model), then confirm via read_state
+    psu = MP305(FakeHID([
+        _resp(P.RESP_STATE, _state_payload(model=0)),   # initial read_state (current = DC)
+        _resp(P.RESP_CONTROL, b"\x00"),                 # request_remote (0xC8 remoteCon=2)
+        _resp(P.RESP_CONTROL, b"\x00"),                 # switch (0xC8 remoteCon=1 model=2)
+        _resp(P.RESP_STATE, _state_payload(model=2)),   # confirm -> now in USB-PD
+    ]))
+    assert psu.set_mode(2) == 2
+    req = P.parse_report(psu._dev.written[1])
+    assert req.cmd == P.CMD_CONTROL and req.payload[0] == 2      # remote request in current (DC) mode
+    sw = P.parse_report(psu._dev.written[2])
+    rc, sv, sc, rch, vs, co, out, model, refresh = struct.unpack("<BHHBBBBBB", sw.payload)
+    assert (rc, out, model) == (1, 0, 2)                          # apply, output off, new model=USB-PD
+    assert psu._model == 2
+
+
 def test_e2e_write_program_request():
     psu = MP305(FakeHID([_resp(P.RESP_PROGRAM_WRITE, b"\x00")]))
     psu.write_program(1, [{"V": 5.0, "A": 1.0, "S": 10}])

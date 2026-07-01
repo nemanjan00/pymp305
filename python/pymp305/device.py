@@ -128,6 +128,7 @@ class MP305:
         self.device_name: str | None = None   # "MP305A" / "MP305B", set by hardware_info()
         self._no_realtime = False              # set if the unit never answers the 0xBD realtime poll
         self._remote_held = False              # True once the device has granted remote control
+        self._model = 0                        # last-seen active mode (0 DC, 1 program, 2 USB-PD, 3 charge)
 
     # ---- connection ------------------------------------------------------
     @staticmethod
@@ -217,11 +218,15 @@ class MP305:
         if realtime and not self._no_realtime:
             try:
                 f = self.request(P.CMD_REALTIME, P.RESP_STATE, timeout_ms=timeout_ms)
-                return State.parse(f.values, device_name=self.device_name)
+                st = State.parse(f.values, device_name=self.device_name)
+                self._model = st.model
+                return st
             except MP305Error:
                 self._no_realtime = True   # this unit doesn't answer 0xBD; use 0xC2 from now on
         f = self.request(P.CMD_STATE_INFO, P.RESP_STATE, timeout_ms=timeout_ms)
-        return State.parse(f.values, device_name=self.device_name)
+        st = State.parse(f.values, device_name=self.device_name)
+        self._model = st.model
+        return st
 
     def read_system_settings(self, timeout_ms: int = 1500) -> SystemSettings:
         f = self.request(P.CMD_SYS_GET, P.RESP_SYS, timeout_ms=timeout_ms)
@@ -243,10 +248,42 @@ class MP305:
     def _control_status(frame: P.Frame) -> int:
         return frame.payload[0] if frame.payload else -1
 
+    # Each mode has its own connect command (cmd, response). Remote control and
+    # mode switching are done through the CURRENT mode's command -- e.g. while in
+    # USB-PD mode you request remote and switch away with 0xE8, not 0xC8.
+    _MODE_CONNECT = {
+        0: (P.CMD_CONTROL,        P.RESP_CONTROL),          # DC PSU
+        1: (0xE2,                 P.RESP_PROGRAM_CONNECT),  # programmable
+        2: (0xE8,                 P.RESP_PDO_CONNECT),      # USB-PD
+        3: (P.CMD_CHARGE_CONTROL, P.RESP_CHARGE_CONTROL),   # charge
+    }
+
+    def _mode_payload(self, mode: int, remote_con: int, new_model: int,
+                      st: "State | None" = None) -> bytes:
+        """Build the payload for `mode`'s connect command carrying `remote_con`
+        and selecting `new_model`, output off. When leaving DC with remote_con=1
+        the DC setpoint is preserved from `st` (a remote_con=2 request ignores
+        these fields, so it is harmless there)."""
+        if mode == 0:
+            cc = ControlCommand(remote_con=remote_con, model=new_model, output=0)
+            if st is not None:
+                cc.set_voltage, cc.set_current = st.set_voltage, st.set_current
+                cc.voltage_slow, cc.current_over = st.voltage_slow, st.current_over
+            return cc.payload()
+        if mode == 1:
+            return C.ProgramConnect(remote_con=remote_con, output=0, model=new_model).build()[1]
+        if mode == 2:
+            return C.PDOConnect(remote_con=remote_con, output=0, model=new_model).build()[1]
+        if mode == 3:
+            return ChargeCommand(remote_con=remote_con, output=0, model=new_model).payload()
+        raise MP305Error(f"unknown model {mode}")
+
     def request_remote(self, timeout_ms: int = 1500) -> bool:
-        """Request remote control from the device (remoteCon=2). Returns True if
-        granted (0xC9 status 0). Does not change any setpoint."""
-        f = self.control(ControlCommand(remote_con=2), timeout_ms=timeout_ms)
+        """Request remote control from the device (remoteCon=2), using the current
+        mode's connect command. Returns True if granted (status 0). Does not
+        change any setpoint."""
+        cmd, expect = self._MODE_CONNECT.get(self._model, self._MODE_CONNECT[0])
+        f = self.request(cmd, expect, self._mode_payload(self._model, 2, self._model), timeout_ms)
         self._remote_held = self._control_status(f) == 0
         return self._remote_held
 
@@ -254,6 +291,30 @@ class MP305:
         if not self._remote_held and not self.request_remote(timeout_ms=timeout_ms):
             raise MP305Error("device refused remote control (0xC9 status 1) -- "
                              "is another controller connected, or the panel locked?")
+
+    def set_mode(self, model: int, timeout_ms: int = 1500) -> int:
+        """Switch the device's active mode: 0=DC PSU, 1=programmable, 2=USB-PD,
+        3=charge. Acquires and KEEPS remote control (the mode only persists while
+        remote is held -- release_remote() reverts the unit to DC). The switch is
+        sent through the current mode's connect command, as the device requires.
+        Returns the confirmed model."""
+        if model not in self._MODE_CONNECT:
+            raise MP305Error(f"unknown model {model} (expected 0/1/2/3)")
+        st = self.read_state(timeout_ms=timeout_ms)   # also refreshes self._model
+        cur = st.model
+        self._ensure_remote(timeout_ms)               # request remote in the current mode
+        if cur == model:
+            return model
+        cmd, expect = self._MODE_CONNECT[cur]
+        self.request(cmd, expect,
+                     self._mode_payload(cur, 1, model, st=st if cur == 0 else None), timeout_ms)
+        last = cur
+        for _ in range(6):                            # the state frame lags the switch by ~1 read
+            last = self.read_state(timeout_ms=timeout_ms).model
+            if last == model:
+                return model
+            time.sleep(0.1)
+        raise MP305Error(f"mode switch to {model} not confirmed (still {last})")
 
     def set_output(self, voltage: float | None = None, current: float | None = None,
                    on: bool | None = None, *, model: int = 0,
