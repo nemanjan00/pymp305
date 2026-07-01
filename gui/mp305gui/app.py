@@ -775,6 +775,9 @@ class MainWindow(QWidget):
         self.pd_out_btn = OutputButton("⚡   PD OUTPUT ON", "⚡   ENABLE PD OUTPUT")
         self.pd_out_btn.toggled.connect(self._on_pd_output)
         v.addWidget(self.pd_out_btn)
+        self.pd_profile_lbl = QLabel("active profile: —"); self.pd_profile_lbl.setFont(mono(13))
+        self.pd_profile_lbl.setStyleSheet(f"color:{C['warn']};")
+        v.addWidget(self.pd_profile_lbl)
         v.addWidget(_lab("ADVERTISED PROFILES  ·  tap to toggle", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
         self._pdo_btns = []
@@ -1132,6 +1135,7 @@ class MainWindow(QWidget):
             for i, item in enumerate(pdos):     # keep labels fresh (values), not toggle state
                 self._pdo_btns[i].setText(item["label"])
         self._emark_lab.setText(str(st.get("emarker", "—")))
+        self.pd_profile_lbl.setText(f"active profile:  {st.get('pd_profile', '—')}")
         # Program panel: step list, current step highlighted, run state on the button
         steps = st.get("program_steps", [])
         if len(self._prog_lbls) != len(steps):

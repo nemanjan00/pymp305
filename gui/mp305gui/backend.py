@@ -96,6 +96,7 @@ class RealBackend:
         else:
             em, items = getattr(self, "_em", "—"), getattr(self, "_pdo_items", [])
         d["emarker"] = em; d["pdos"] = _pdo_view(items)
+        d["pd_profile"] = getattr(self, "_pd_profile", "—")
         d["chem"] = getattr(self, "_chem", 0); d["cells"] = getattr(self, "_cells", 1)
         d["charge_current"] = getattr(self, "_charge_a", 0.0)
         if st.model == MODE_CHARGE:                  # enrich with live charge telemetry
@@ -148,10 +149,12 @@ class RealBackend:
                 self._em = "USB-C cable" if em.get("present") else "no e-marked cable"
             except Exception:
                 self._em = "—"
-            self._pdo_items = []
+            self._pdo_items = []; self._pd_profile = "—"
             try:
-                p = self._psu.read_pdo(self._psu.read_pdo_index())
+                idx = self._psu.read_pdo_index()
+                p = self._psu.read_pdo(idx)
                 self._pdo_items = list(p.items) if p else []
+                self._pd_profile = (p.name if p and p.name else f"#{idx}")
             except Exception:
                 pass
         return self._em, self._pdo_items
@@ -357,7 +360,7 @@ class SimBackend:
             "charging": self.charging, "out_state": out_state, "current_over": self.current_over,  # 1=CV 2=CC
             "errors": ["errorDcOutOCP"] if self._ocp_trip else [],
             "mode": "CC" if out_state == 2 else "CV",
-            "emarker": SIM_EMARKER, "pdos": _pdo_view(self.sim_pdos),
+            "emarker": SIM_EMARKER, "pdos": _pdo_view(self.sim_pdos), "pd_profile": "60 W",
             "program_name": "Sequence", "program_steps": self.prog_steps,
             "program_index": self.prog_index if self.prog_running else 0,
             "program_running": self.prog_running,
