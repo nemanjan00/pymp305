@@ -48,7 +48,14 @@ class RealBackend:
     def connect(self) -> dict:
         from pymp305 import MP305
         self._psu = MP305.open()
-        info = self._psu.hardware_info()
+        info = None
+        for _ in range(4):                 # the unit can be slow to answer right after open
+            try:
+                info = self._psu.hardware_info(); break
+            except Exception:
+                time.sleep(0.4)
+        if info is None:
+            info = self._psu.hardware_info()   # last try; let it raise if truly unresponsive
         self._name = info.device_name or "MP305"
         return {"model": self._name, "fw": info.app_version, "transport": "USB-HID"}
 
