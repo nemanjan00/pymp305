@@ -11,19 +11,29 @@ Control voltage, current, and output over USB — no app, no cloud, just Python.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Transport: USB-HID](https://img.shields.io/badge/transport-USB--HID-success.svg)](./PROTOCOL.md)
-[![status: untested on hardware](https://img.shields.io/badge/hardware-UNTESTED-red.svg)](#-status-not-yet-tested-on-hardware)
+[![status: DC verified on hardware](https://img.shields.io/badge/hardware-DC%20verified%20(MP305B)-yellow.svg)](#-status-partially-verified-on-hardware)
 
 </div>
 
-> # 🚨 STATUS: NOT YET TESTED ON HARDWARE
+> # ⚡ STATUS: PARTIALLY VERIFIED ON HARDWARE
 >
-> **Every line of this library was reverse-engineered from ISDT's WebLink web app — it has
-> not yet been run against a physical MP305A/MP305B.** The framing, decoding, units, and
-> command/firmware encoding are covered by golden-vector tests, but nothing here has talked
-> to a real device. Expect rough edges on first contact (HID report size, the BLE binding
-> handshake, exact charge/PD field meanings). **The OTA / firmware-flashing code is
-> especially unverified — treat it as dangerous.** Use at your own risk, and please open an
-> issue with results once you try it on actual hardware. See [Bring-up](./python/README.md).
+> This library was reverse-engineered from ISDT's WebLink web app. As of **v0.6.0 it has been
+> run against a physical MP305B** (app V1.6.0.46):
+>
+> - ✅ **Verified working:** all telemetry reads (device info, live V/I/W/temp, system
+>   settings, charge state, PDO/e-marker, program list/steps), full **DC PSU control**
+>   (set V/I, output on/off), and **mode switching** (`set_mode`) across DC / programmable /
+>   USB-PD / charge.
+> - ⚠️ **Not yet fully verified:** charge / USB-PD / programmable *control* (they now perform
+>   the correct remote handshake but need a battery / PD load to exercise), and everything on
+>   the **MP305A** (only the MP305B has been tested).
+> - 🚫 **Do not use untested:** the **OTA / firmware-flashing** path (`flash()`) and
+>   `soft_reset()` remain **unverified — treat as dangerous.**
+>
+> Getting the driver talking to real hardware needed several protocol fixes (response header
+> group `0x21`, a `0xBD`→`0xC2` fallback, the two-step remote handshake); see the CHANGELOG.
+> Use at your own risk, and please open an issue with results — MP305A reports especially
+> welcome. See [Bring-up](./python/README.md).
 
 ```mermaid
 flowchart LR
@@ -58,9 +68,10 @@ bench from Python: automated test rigs, battery cycling, data logging, CI for ha
 only model-specific behaviour (a few error-code mappings) is detected automatically from
 the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.md)**.
 
-> ⚠️ **Heads-up:** the framing/decoding layer is covered by passing golden-vector tests,
-> but this has **not yet been validated against physical hardware**. First-run bring-up
-> notes are in [`python/README.md`](./python/README.md). Reports welcome!
+> ⚠️ **Heads-up:** the DC PSU path, all telemetry reads, and mode switching are verified on a
+> physical **MP305B** (v0.6.0); charge/USB-PD/programmable *control* and the whole **MP305A**
+> are not yet confirmed. Bring-up notes are in [`python/README.md`](./python/README.md).
+> Reports welcome — especially from MP305A owners!
 
 ## Features
 

@@ -7,10 +7,11 @@ Reverse-engineered from WebLink's public source-maps; the full protocol is docum
 [`../PROTOCOL.md`](../PROTOCOL.md). (The recovered upstream JS is ISDT's copyright and is
 kept locally under `reversing/`, which is git-ignored and not published.)
 
-> **Status: not yet validated against real hardware.** Framing, decoding, units, and
-> firmware-decrypt are covered by golden-vector tests (`pytest`, all passing), but nothing
-> here has talked to a device — `open()` emits a one-time `UserWarning` to that effect, and
-> OTA flashing is gated behind an explicit `allow_untested_ota=True`. See *Bring-up* below.
+> **Status: partially validated on hardware (v0.6.0).** Verified on a physical **MP305B**:
+> all telemetry reads, DC PSU control (V/I/output), and `set_mode()`. Charge / USB-PD /
+> programmable *control* and the whole **MP305A** are not yet confirmed. `open()` still emits
+> a one-time `UserWarning`, and OTA flashing / `soft_reset()` remain unverified — OTA is gated
+> behind an explicit `allow_untested_ota=True`. See *Bring-up* below.
 
 ## Install
 

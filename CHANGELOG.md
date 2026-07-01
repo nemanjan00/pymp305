@@ -2,7 +2,36 @@
 
 All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = features).
 
-> ⚠️ Nothing here has been validated against physical hardware yet — see the README banner.
+> ⚡ As of 0.6.0 the DC PSU path, all telemetry reads, and mode switching are verified on a
+> physical MP305B. Charge/USB-PD/programmable *control*, the MP305A, and OTA remain unverified
+> — see the README banner.
+
+## 0.6.0
+
+First release validated against physical hardware (an **MP305B**, app V1.6.0.46). Several
+reverse-engineering gaps that blocked all device communication were found and fixed; the DC
+PSU path, every telemetry read, and mode switching are now confirmed working on-device.
+
+### Fixed
+- **HID responses use header group `0xAA 0x21`, not `0xAA 0x12`.** `parse_report` matched only
+  the command group, so every `request()` timed out. It now accepts both.
+- **`read_state()` realtime poll (`0xBD`) is unanswered on this unit** — it now falls back to
+  the stored-state query (`0xC2`, same `0xC3` frame) and caches the choice.
+- **Control commands need a two-step remote handshake.** `0xC8` (and the `0xE2`/`0xE8`/`0xEE`
+  connects) were sent with `remoteCon=1` and silently rejected (`0xC9`-style status `1`);
+  setpoints never applied. The driver now requests control with `remoteCon=2` first, then
+  applies with `remoteCon=1`, re-acquiring once if control is dropped.
+- **Short response frames no longer crash decoding.** `read_program_state()`/`read_emarker()`
+  raised `IndexError` when the device omitted trailing e-marker bytes; the int decoders now
+  read past the end as `0` (matching WebLink's JS).
+- **`charge()` awaited the wrong response** (`0xED` charge-info instead of `0xEF`
+  charge-control).
+
+### Added
+- **`set_mode(model)`** — switch between DC / programmable / USB-PD / charge. Switching is
+  routed through the current mode's connect command (as the device requires) and holds remote
+  control; releasing remote reverts the unit to DC.
+- **`request_remote()`** is now mode-aware (acquires control via the active mode's command).
 
 ## 0.5.3
 
