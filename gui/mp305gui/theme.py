@@ -72,4 +72,14 @@ QLabel#pill {{
     padding: 3px 12px; font-size: 12px; font-weight: 700; color: {C['muted']};
 }}
 QToolTip {{ background: {C['card']}; color: {C['text']}; border: 1px solid {C['stroke']}; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 2px 2px 0; }}
+QScrollBar::handle:vertical {{ background: {C['stroke']}; border-radius: 5px; min-height: 28px; }}
+QScrollBar::handle:vertical:hover {{ background: {C['accent']}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; background: transparent; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 0 2px 2px 2px; }}
+QScrollBar::handle:horizontal {{ background: {C['stroke']}; border-radius: 5px; min-width: 28px; }}
+QScrollBar::handle:horizontal:hover {{ background: {C['accent']}; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; background: transparent; }}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
 """
