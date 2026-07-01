@@ -131,6 +131,34 @@ def build_report(cmd: int, payload: bytes = b"", report_size: int = REPORT_SIZE)
     return buf
 
 
+def _pad(buf: bytes, report_size: int) -> bytes:
+    if report_size and len(buf) < report_size + 1:
+        buf += b"\x00" * (report_size + 1 - len(buf))
+    return buf
+
+
+def build_reports(cmd: int, payload: bytes = b"", report_size: int = REPORT_SIZE) -> list[bytes]:
+    """HID output report(s) for cmd+payload. Frames that fit in one report are sent
+    as-is; longer frames (e.g. write_program / write_pdo) are fragmented exactly like
+    WebLink's HIDDeviceManager: 61 frame bytes per report, each report prefixed with
+    its own payload-length byte (the first fragment overwrites the frame's length byte
+    with the fragment length — the device reassembles from these). Report-id prepended,
+    each padded to report_size."""
+    frame = build_frame(cmd, payload)
+    if len(frame) <= 63:
+        return [_pad(bytes([REPORT_ID]) + frame, report_size)]
+    # Fragments must be sent at their exact length (NOT padded to the report size) —
+    # padding breaks the device's reassembly (verified on hardware: padded → no ack,
+    # unpadded → 0xDB ok). Matches WebLink/WebHID, which sends each fragment unpadded.
+    pkg, reports = 61, []
+    for i in range(0, len(frame), pkg):
+        chunk = frame[i:i + pkg]
+        pkt = bytearray(chunk) if i == 0 else bytearray([0x00]) + bytearray(chunk)
+        pkt[0] = (len(pkt) - 1) & 0xFF      # per-report payload length
+        reports.append(bytes([REPORT_ID]) + bytes(pkt))
+    return reports
+
+
 @dataclass
 class Frame:
     cmd: int

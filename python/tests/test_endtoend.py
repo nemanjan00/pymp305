@@ -167,6 +167,20 @@ def test_e2e_set_mode_switch():
     assert psu._model == 2
 
 
+def test_build_reports_fragments_large_frames():
+    # small frame -> one padded report
+    small = P.build_reports(P.CMD_STATE_INFO)
+    assert len(small) == 1 and small[0][0] == P.REPORT_ID
+    # large frame (write_program, 6 steps) -> multiple UNPADDED fragments, each prefixed
+    # with its own payload-length byte
+    cmd, payload = C.programmable_write(1, [{"V": 5, "A": 3, "S": 10}] * 5 + [{"V": 0, "A": 0, "S": 0}])
+    reps = P.build_reports(cmd, payload)
+    assert len(reps) >= 2
+    assert any(len(r) < P.REPORT_SIZE + 1 for r in reps)   # fragments not padded to report size
+    for r in reps:
+        assert r[0] == P.REPORT_ID and r[1] == len(r) - 2   # [report-id, len, ...len bytes]
+
+
 def test_e2e_write_program_request():
     psu = MP305(FakeHID([_resp(P.RESP_PROGRAM_WRITE, b"\x00")]))
     psu.write_program(1, [{"V": 5.0, "A": 1.0, "S": 10}])

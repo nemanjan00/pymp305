@@ -173,10 +173,12 @@ class MP305:
 
     # ---- raw transport ---------------------------------------------------
     def send(self, cmd: int, payload: bytes = b"") -> None:
-        report = P.build_report(cmd, payload, self._report_size)
-        n = self._dev.write(report)
-        if n < 0:
-            raise MP305Error("HID write failed")
+        reports = P.build_reports(cmd, payload, self._report_size)
+        for i, report in enumerate(reports):
+            if self._dev.write(report) < 0:
+                raise MP305Error("HID write failed")
+            if len(reports) > 1 and i < len(reports) - 1:
+                time.sleep(0.005)   # inter-fragment gap, as WebLink does
 
     def send_raw_payload(self, payload: bytes) -> None:
         """Send a payload whose first byte is the command byte (e.g. BOOT/REBOOT)."""
