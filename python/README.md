@@ -7,11 +7,14 @@ Reverse-engineered from WebLink's public source-maps; the full protocol is docum
 [`../PROTOCOL.md`](../PROTOCOL.md). (The recovered upstream JS is ISDT's copyright and is
 kept locally under `reversing/`, which is git-ignored and not published.)
 
-> **Status: partially validated on hardware (v0.6.0).** Verified on a physical **MP305B**:
-> all telemetry reads, DC PSU control (V/I/output), and `set_mode()`. Charge / USB-PD /
-> programmable *control* and the whole **MP305A** are not yet confirmed. `open()` still emits
-> a one-time `UserWarning`, and OTA flashing / `soft_reset()` remain unverified — OTA is gated
-> behind an explicit `allow_untested_ota=True`. See *Bring-up* below.
+> **Status: verified on hardware (MP305B).** Confirmed on a physical **MP305B**: all telemetry
+> reads, DC PSU control (V/I/output, CV/CC, over-current), `set_mode()`, USB-PD source control
+> (advertise-set + output on/off, negotiated against a real PD sink), programmable sequences
+> (read/write/run, writes confirmed by read-back), and **BLE** (`MP305BLE`) reads + control.
+> **Charge control** (needs a battery pack) and the whole **MP305A** are not yet confirmed.
+> The blanket untested `UserWarning` is now off (`HARDWARE_VALIDATED = True`); OTA flashing /
+> `soft_reset()` / calibration remain unverified and keep their own gates — OTA behind an
+> explicit `allow_untested_ota=True`, `soft_reset()` behind `confirm=True`. See *Bring-up* below.
 
 ## Install
 
@@ -140,5 +143,7 @@ drop the length/0xAA/checksum wrapper (`[0x12, cmd, …payload]`): commands go t
 characteristic `af01`, responses arrive as notifications (parsed at index 2, reusing
 `responses.py`), and an `af02` binding handshake starts the session; `fee0/fee1` carry BLE OTA.
 
-MP305 has Bluetooth, but its BLE-module firmware isn't published in the OTA feed and this
-transport is **unverified on hardware** — USB-HID is the primary path.
+MP305 has Bluetooth; this transport is **verified on hardware (MP305B)** — reads and control
+both work (binding is touch-gated: the device prompts you to accept on its screen). USB-HID
+remains the primary path. Note the BLE-module firmware isn't published in the OTA feed, so
+`flash_ble()` stays untested.

@@ -9,8 +9,11 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 
-# Flip to True (with a release) once the library is validated against real hardware.
-HARDWARE_VALIDATED = False
+# Core paths are validated on a physical MP305B (reads, DC control, mode switching, USB-PD
+# source control, programmable read/write/run, and BLE). The genuinely risky paths keep their
+# own explicit gates (OTA behind allow_untested_ota, soft_reset behind confirm), so the blanket
+# untested warning is no longer accurate. Charge control and the MP305A remain unconfirmed.
+HARDWARE_VALIDATED = True
 _warned_untested = False
 
 

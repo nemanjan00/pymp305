@@ -11,7 +11,7 @@ Control voltage, current, and output over USB — no app, no cloud, just Python.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![Transport: USB-HID](https://img.shields.io/badge/transport-USB--HID-success.svg)](./PROTOCOL.md)
-[![status: DC verified on hardware](https://img.shields.io/badge/hardware-DC%20verified%20(MP305B)-yellow.svg)](#-status-partially-verified-on-hardware)
+[![status: verified on hardware](https://img.shields.io/badge/hardware-verified%20(MP305B)-yellow.svg)](#-status-partially-verified-on-hardware)
 
 </div>
 
@@ -20,15 +20,18 @@ Control voltage, current, and output over USB — no app, no cloud, just Python.
 > This library was reverse-engineered from ISDT's WebLink web app. As of **v0.6.0 it has been
 > run against a physical MP305B** (app V1.6.0.46):
 >
-> - ✅ **Verified working:** all telemetry reads (device info, live V/I/W/temp, system
->   settings, charge state, PDO/e-marker, program list/steps), full **DC PSU control**
->   (set V/I, output on/off), and **mode switching** (`set_mode`) across DC / programmable /
->   USB-PD / charge.
-> - ⚠️ **Not yet fully verified:** charge / USB-PD / programmable *control* (they now perform
->   the correct remote handshake but need a battery / PD load to exercise), and everything on
->   the **MP305A** (only the MP305B has been tested).
-> - 🚫 **Do not use untested:** the **OTA / firmware-flashing** path (`flash()`) and
->   `soft_reset()` remain **unverified — treat as dangerous.**
+> - ✅ **Verified working (USB-HID):** all telemetry reads (device info, live V/I/W/temp,
+>   system settings, charge state, PDO/e-marker, program list/steps), full **DC PSU control**
+>   (set V/I, output on/off, CV/CC, over-current CC↔OCP), **mode switching** (`set_mode`) across
+>   DC / programmable / USB-PD / charge, **USB-PD source control** (advertise-set + output
+>   on/off — negotiated against a real PD sink at 15 V), and **programmable sequences**
+>   (read / write / run — writes confirmed by read-back).
+> - ✅ **Verified over Bluetooth:** `MP305BLE` reads **and** control (touch-gated remote
+>   handshake), same API as USB.
+> - ⚠️ **Not yet verified:** **charge control** (the handshake runs but exercising it needs a
+>   real battery pack), and everything on the **MP305A** (only the MP305B has been tested).
+> - 🚫 **Do not use untested:** the **OTA / firmware-flashing** path (`flash()`),
+>   `soft_reset()`, and calibration remain **unverified — treat as dangerous.**
 >
 > Getting the driver talking to real hardware needed several protocol fixes (response header
 > group `0x21`, a `0xBD`→`0xC2` fallback, the two-step remote handshake); see the CHANGELOG.
@@ -68,10 +71,10 @@ bench from Python: automated test rigs, battery cycling, data logging, CI for ha
 only model-specific behaviour (a few error-code mappings) is detected automatically from
 the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.md)**.
 
-> ⚠️ **Heads-up:** the DC PSU path, all telemetry reads, and mode switching are verified on a
-> physical **MP305B** (v0.6.0); charge/USB-PD/programmable *control* and the whole **MP305A**
-> are not yet confirmed. Bring-up notes are in [`python/README.md`](./python/README.md).
-> Reports welcome — especially from MP305A owners!
+> ⚠️ **Heads-up:** DC PSU control, all telemetry reads, mode switching, USB-PD source control,
+> programmable sequences (incl. writes), and BLE control are verified on a physical **MP305B**;
+> **charge control** and the whole **MP305A** are not yet confirmed. Bring-up notes are in
+> [`python/README.md`](./python/README.md). Reports welcome — especially from MP305A owners!
 
 ## Features
 
@@ -84,10 +87,10 @@ the device name. The protocol is fully documented in **[PROTOCOL.md](./PROTOCOL.
 - 📡 **USB *and* Bluetooth** — `MP305` over USB-HID, `MP305BLE` (async, `bleak`) over BLE — same API
 - 💾 **Firmware tooling** — decrypt official `.bin` images (key ships in the header) + experimental OTA flashing (HID & BLE)
 - 🖥️ **Desktop GUI** — Dracula-themed PyQt6 dashboard with live charts + a no-hardware simulator (see [`gui/`](./gui))
-- 🛟 **Safety-gated** — one-time untested-on-hardware warning; OTA behind an explicit `allow_untested_ota=True`
+- 🛟 **Safety-gated** — dangerous paths gated: OTA behind `allow_untested_ota=True`, `soft_reset()` behind `confirm=True`
 - 🤝 **A & B in one driver** — `MP305`, with `MP305A` / `MP305B` aliases; model auto-detected
 - 🧱 **Clean layers** — pure `protocol.py` framing shared by both transports
-- 🧪 **Golden-vector tested** (framing/units/firmware-decrypt) — **hardware validation pending**
+- 🧪 **Golden-vector tested** (framing/units/firmware-decrypt) + **verified on MP305B hardware** (USB & BLE)
 - 🪪 **MIT licensed**, no ISDT code shipped (see *Clean-room* below)
 
 ## Install
@@ -225,7 +228,9 @@ copyrightable; the implementation here is independent.
 
 ## Roadmap
 
-- [ ] **Validate against real hardware** (unit incoming 🛒 — see the banner up top), then flip `HARDWARE_VALIDATED`
+- [x] **Validate against real hardware** — MP305B verified (USB & BLE): reads, DC control,
+      mode switching, USB-PD source control, programmable read/write/run. Remaining: charge
+      control (needs a pack), MP305A, and OTA/`soft_reset` (still gated as dangerous)
 - [x] BLE transport via `bleak` (`MP305BLE`, async — same command set, reuses `responses.py`)
 - [x] USB-PD (PDO) + programmable-sequence helpers — read, select/run, **and write**
 - [x] USB-C e-marker reader

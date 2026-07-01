@@ -11,8 +11,9 @@ casual gesture (in particular there is **no scroll-to-change** — a stray scrol
 move the voltage on a live DUT).
 
 > Runs against a real MP305 (via `pymp305`/`hidapi`) **or** a built-in simulator, so you can
-> try it with no hardware — the shot above is the simulator driving a CV→CC transition. Like
-> the library, the hardware path is **not yet validated on a real device.**
+> try it with no hardware. The dashboard above is a real **MP305B** (DC into a 390 Ω load); the
+> other mode shots are the simulator. DC / mode-switch / USB-PD / programmable control are
+> **verified on hardware**; charge control and the MP305A are not yet confirmed.
 
 ## Run
 

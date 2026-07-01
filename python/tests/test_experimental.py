@@ -75,13 +75,31 @@ def test_flash_gated_without_allow_untested_ota():
 
 def test_warn_untested_fires_once():
     import warnings
-    P._warned_untested = False                 # reset the one-shot guard
-    assert P.HARDWARE_VALIDATED is False
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        P.warn_untested()
-        P.warn_untested()                      # second call must be silent
-    assert sum(issubclass(x.category, UserWarning) for x in w) == 1
+    orig = P.HARDWARE_VALIDATED
+    try:
+        P.HARDWARE_VALIDATED = False            # exercise the not-yet-validated path
+        P._warned_untested = False              # reset the one-shot guard
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            P.warn_untested()
+            P.warn_untested()                  # second call must be silent
+        assert sum(issubclass(x.category, UserWarning) for x in w) == 1
+    finally:
+        P.HARDWARE_VALIDATED = orig
+
+
+def test_warn_untested_silent_when_validated():
+    import warnings
+    orig = P.HARDWARE_VALIDATED
+    try:
+        P.HARDWARE_VALIDATED = True             # validated -> no blanket warning
+        P._warned_untested = False
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            P.warn_untested()
+        assert not any(issubclass(x.category, UserWarning) for x in w)
+    finally:
+        P.HARDWARE_VALIDATED = orig
 
 
 if __name__ == "__main__":

@@ -2,9 +2,29 @@
 
 All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = features).
 
-> ⚡ As of 0.6.0 the DC PSU path, all telemetry reads, and mode switching are verified on a
-> physical MP305B. Charge/USB-PD/programmable *control*, the MP305A, and OTA remain unverified
-> — see the README banner.
+> ⚡ As of 0.6.2, reads, DC control, mode switching, USB-PD source control, programmable
+> read/write/run, and BLE control are all verified on a physical MP305B (USB & BLE). Charge
+> control (needs a battery pack), the MP305A, and OTA remain unverified — see the README banner.
+
+## 0.6.2
+
+### Verified on hardware (MP305B, app V1.6.0.46)
+- **USB-PD source control** — advertise-set (which profiles the device offers) + PD output
+  on/off, negotiated against a real PD sink at 15 V.
+- **Programmable sequences** — read / write / run; writes confirmed by reading them back.
+- **Bluetooth (`MP305BLE`)** — reads *and* control (touch-gated remote handshake), same API
+  as USB.
+
+### Changed
+- **`HARDWARE_VALIDATED = True`** — the blanket "not validated on hardware" `UserWarning` on
+  `open()` is now off; the core paths are proven. The genuinely risky paths keep their own
+  gates (OTA behind `allow_untested_ota=True`, `soft_reset()` behind `confirm=True`).
+- Docs (root / `python/` / `gui/` READMEs, PROTOCOL notes) updated to reflect what is verified.
+
+### GUI
+- Refreshed all screenshots on the current dark theme; added a **Program-mode** screenshot
+  (button-group step editor). The dashboard shot is real MP305B hardware.
+- Fixed two hint labels that clipped in the left panel (PD "set on device", Program header).
 
 ## 0.6.1
 
