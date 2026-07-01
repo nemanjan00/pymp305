@@ -18,7 +18,33 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 # operating modes (the device's `model` field): mutually exclusive
 MODE_DC, MODE_PD, MODE_CHARGE = 0, 2, 3
 CHEMS = ["LiHv", "LiPo", "LiFe", "Li-ion", "NiMH", "NiCd", "Pb"]
-SIM_PDOS = [(5.0, 3.0), (9.0, 3.0), (12.0, 3.0), (15.0, 3.0), (20.0, 5.0)]
+def _pdo_label(it: dict) -> str:
+    """WebLink-style label for a decoded PDO item (fixed voltage, APDO/AVS range)."""
+    k = it.get("kind")
+    if k == "APDO":
+        return "%g–%g V  ·  %.2f A" % (it.get("min_voltage_v", 0), it.get("max_voltage_v", 0),
+                                       it.get("max_current_a", 0))
+    if k == "SPRAVS":
+        return "9–15 V · %.2f A   /   15–20 V · %.2f A" % (it.get("max_current_15v_a", 0),
+                                                           it.get("max_current_20v_a", 0))
+    return "%g V  ·  %.2f A" % (it.get("voltage_v", 0), it.get("current_a", 0))
+
+
+def _pdo_view(items):
+    """Shape decoded PDO items for the GUI: [{'label','checked'}] (source advertise-set)."""
+    return [{"label": _pdo_label(it), "checked": bool(it.get("type"))} for it in items]
+
+
+# simulator source PDOs (mirrors a real 60 W source: 5 fixed + APDO range + SPR-AVS)
+SIM_PDOS = [
+    {"kind": "FPDO", "voltage_v": 5.0, "current_a": 3.0, "type": True},
+    {"kind": "FPDO", "voltage_v": 9.0, "current_a": 3.0, "type": True},
+    {"kind": "FPDO", "voltage_v": 12.0, "current_a": 3.0, "type": True},
+    {"kind": "FPDO", "voltage_v": 15.0, "current_a": 3.0, "type": False},
+    {"kind": "FPDO", "voltage_v": 20.0, "current_a": 3.0, "type": False},
+    {"kind": "APDO", "min_voltage_v": 3.3, "max_voltage_v": 21.0, "max_current_a": 3.0, "type": False},
+    {"kind": "SPRAVS", "max_current_15v_a": 3.0, "max_current_20v_a": 3.0, "type": False},
+]
 SIM_EMARKER = "USB-C · 100 W (20 V / 5 A) · USB 3.2 Gen2"
 
 
@@ -66,10 +92,10 @@ class RealBackend:
         # connect (a 3-4 request burst) destabilises the firmware, so fetch them
         # lazily only while in USB-PD mode. In other modes reuse the last values.
         if st.model == MODE_PD:
-            em, pdos = self._caps()
+            em, items = self._caps()
         else:
-            em, pdos = getattr(self, "_em", "—"), getattr(self, "_pl", [])
-        d["emarker"] = em; d["pdos"] = pdos; d["pdo_sel"] = getattr(self, "_pdo_sel", 0)
+            em, items = getattr(self, "_em", "—"), getattr(self, "_pdo_items", [])
+        d["emarker"] = em; d["pdos"] = _pdo_view(items)
         d["chem"] = getattr(self, "_chem", 0); d["cells"] = getattr(self, "_cells", 1)
         d["charge_current"] = getattr(self, "_charge_a", 0.0)
         if st.model == MODE_CHARGE:                  # enrich with live charge telemetry
@@ -93,18 +119,13 @@ class RealBackend:
                 self._em = "USB-C cable" if em.get("present") else "no e-marked cable"
             except Exception:
                 self._em = "—"
-            self._pl = []
+            self._pdo_items = []
             try:
-                idx = self._psu.read_pdo_index()
-                self._pdo_sel = idx
-                p = self._psu.read_pdo(idx)
-                for it in (p.items if p else []):
-                    v, a = it.get("voltage_v", 0.0), it.get("current_a", 0.0)
-                    if v > 0:
-                        self._pl.append((v, a))
+                p = self._psu.read_pdo(self._psu.read_pdo_index())
+                self._pdo_items = list(p.items) if p else []
             except Exception:
                 pass
-        return self._em, self._pl
+        return self._em, self._pdo_items
 
     def apply(self, v=None, a=None, on=None):
         self._psu.set_output(voltage=v, current=a, on=on)
@@ -125,10 +146,13 @@ class RealBackend:
             remote_con=1, battery_type=getattr(self, "_chem", 0), cells=getattr(self, "_cells", 1),
             current=getattr(self, "_charge_a", 0.0), output=1 if on else 0))
 
-    def select_pdo(self, i):
+    def select_pdo(self, bitmask):
+        # bitmask = which advertised PDOs are enabled (bit i = item i); WebLink's pdoIndex.
         from pymp305 import commands as C
-        self._pdo_sel = int(i)
-        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=int(i), update=1, output=1))
+        bitmask = int(bitmask)
+        self._psu.pdo_connect(C.PDOConnect(remote_con=1, pdo_index=bitmask, update=1, output=1))
+        for i, it in enumerate(getattr(self, "_pdo_items", [])):   # optimistic local reflect
+            it["type"] = bool(bitmask >> i & 1)
 
     def set_current_over(self, mode):
         # CC (0) / OCP (1); set_output does the remote handshake and preserves V/I/output
@@ -172,7 +196,7 @@ class SimBackend:
         self.mode = 0              # operating mode: 0 = DC PSU, 2 = USB-PD, 3 = charge
         self.chem = 1; self.cells = 3; self.charge_a = 1.0; self.charging_ext = False
         self.cbatt = 30.0          # % of the external battery being charged
-        self.pdo_sel = 4           # selected USB-PD profile index
+        self.sim_pdos = [dict(x) for x in SIM_PDOS]   # advertised PD source set (checkable)
         self._t0 = time.monotonic()
         self._last = self._t0
         self._n = 0
@@ -199,8 +223,10 @@ class SimBackend:
         self.charging_ext = bool(on)
         if on: self.mode = 3
 
-    def select_pdo(self, i):
-        self.pdo_sel = max(0, min(len(SIM_PDOS) - 1, int(i)))
+    def select_pdo(self, bitmask):
+        bitmask = int(bitmask)
+        for i, it in enumerate(self.sim_pdos):
+            it["type"] = (i == 0) or bool(bitmask >> i & 1)   # 5 V always advertised
 
     def _charge_step(self, dt):
         if not self.charging_ext or self.cbatt >= 100.0:
@@ -227,8 +253,10 @@ class SimBackend:
         out_state = 0           # 0 = off, 1 = CV, 2 = CC (matches MP305B hardware)
         if self.mode == MODE_CHARGE:                 # charging an external pack
             voltage, current, out_state = self._charge_step(dt)
-        elif self.mode == MODE_PD:                   # USB-PD: output fixed to the selected PDO
-            pv, pa = SIM_PDOS[self.pdo_sel]
+        elif self.mode == MODE_PD:                   # USB-PD: output = highest advertised fixed PDO
+            fixed = [(it["voltage_v"], it["current_a"]) for it in self.sim_pdos
+                     if it.get("kind") == "FPDO" and it["type"]]
+            pv, pa = max(fixed) if fixed else (5.0, 3.0)
             if self.on:
                 i = min(pa, pv / self.load); voltage = pv; current = i
                 out_state = 2 if i >= pa - 1e-9 else 1
@@ -264,7 +292,7 @@ class SimBackend:
             "charging": self.charging, "out_state": out_state, "current_over": self.current_over,  # 1=CV 2=CC
             "errors": ["errorDcOutOCP"] if self._ocp_trip else [],
             "mode": "CC" if out_state == 2 else "CV",
-            "emarker": SIM_EMARKER, "pdos": SIM_PDOS, "pdo_sel": self.pdo_sel,
+            "emarker": SIM_EMARKER, "pdos": _pdo_view(self.sim_pdos),
             "chem": self.chem, "cells": self.cells, "charge_current": self.charge_a,
             "charging_ext": self.charging_ext, "charge_pct": int(round(self.cbatt)),
         }

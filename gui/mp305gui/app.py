@@ -23,6 +23,7 @@ from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
     QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup,
+    QCheckBox,
 )
 
 from .theme import C, STYLESHEET
@@ -770,9 +771,13 @@ class MainWindow(QWidget):
 
     def _pd_page(self):
         page = QWidget(); v = QVBoxLayout(page); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(10)
-        v.addWidget(_lab("USB-PD PROFILES  ·  tap to request", "cardTitle"))
+        v.addWidget(_lab("USB-PD PROFILES  ·  advertise (tick to offer)", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
-        self._pdo_btns = []
+        self._pdo_checks = []
+        self._pdo_apply = QPushButton("Apply advertised set"); self._pdo_apply.setFixedHeight(38)
+        self._pdo_apply.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pdo_apply.clicked.connect(self._apply_pdos)
+        v.addWidget(self._pdo_apply)
         v.addStretch(1)
         em = QFrame(); em.setFixedHeight(58)        # flat: e-marker is read-only cable info
         eml = QVBoxLayout(em); eml.setContentsMargins(2, 8, 2, 0); eml.setSpacing(4)
@@ -783,14 +788,25 @@ class MainWindow(QWidget):
         return page
 
     def _rebuild_pdos(self, pdos):
-        for b in self._pdo_btns:
-            b.setParent(None)
-        self._pdo_btns = []
-        for i, (pv, pa) in enumerate(pdos):
-            b = QPushButton(f"{pv:g} V   ·   {pa:g} A"); b.setFixedHeight(40)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.clicked.connect(lambda _, idx=i: None if self._sync else self.reqSelectPDO.emit(idx))
-            self._pdo_wrap.addWidget(b); self._pdo_btns.append(b)
+        for cb in self._pdo_checks:
+            cb.setParent(None)
+        self._pdo_checks = []
+        for i, item in enumerate(pdos):
+            cb = QCheckBox(item["label"]); cb.setChecked(bool(item["checked"]))
+            if i == 0:                    # the 5 V fixed PDO is mandatory for a PD source
+                cb.setChecked(True); cb.setEnabled(False)
+            cb.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._pdo_wrap.addWidget(cb); self._pdo_checks.append(cb)
+
+    def _apply_pdos(self):
+        if self._sync:
+            return
+        mask = 0
+        for i, cb in enumerate(self._pdo_checks):
+            if i == 0 or cb.isChecked():
+                mask |= (1 << i)
+        self.reqSelectPDO.emit(mask)
+        self._logline(f"USB-PD advertise set → 0x{mask:02X}", C["accent"])
 
     def _switch_mode(self, model, page):
         self.stack.setCurrentIndex(page)
@@ -1050,18 +1066,14 @@ class MainWindow(QWidget):
             self.chg_stat.setText(f"{pct}%   ·   {st['voltage']:.1f} V   ·   {st['current']:.2f} A")
         else:
             self.chg_stat.setText(f"{pct}%   ·   idle" if model == MODE_CHARGE else "idle")
-        # USB-PD panel
+        # USB-PD panel: checkbox advertise-set. Only (re)seed checked state when the row
+        # set changes — don't overwrite the user's in-progress ticks on every poll.
         pdos = st.get("pdos", [])
-        if pdos and len(self._pdo_btns) != len(pdos):
+        if len(self._pdo_checks) != len(pdos):
             self._rebuild_pdos(pdos)
-        sel = st.get("pdo_sel", -1)
-        for i, b in enumerate(self._pdo_btns):
-            if i == sel:
-                b.setStyleSheet(f"QPushButton{{background:{C['accent']};color:{C['panel']};"
-                                f"border:none;border-radius:9px;font-weight:800;}}")
-            else:
-                b.setStyleSheet(f"QPushButton{{background:{C['card_hi']};border:1px solid {C['stroke']};"
-                                f"border-radius:9px;font-weight:700;}}QPushButton:hover{{background:{C['hover']};}}")
+        elif pdos:
+            for i, item in enumerate(pdos):     # keep labels fresh (values), not checked state
+                self._pdo_checks[i].setText(item["label"])
         self._emark_lab.setText(str(st.get("emarker", "—")))
         self._sync = False
 
