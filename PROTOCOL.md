@@ -175,11 +175,26 @@ deviceId[8], hwVer[4] (main.sub.mend.layout), bootVer[4], appVer[4], deviceName[
 
 ## BLE transport
 GATT service `0000af00-…`. Commands are written to characteristic **AF01** as raw
-`[0x12, cmd, …LE-payload]` (no length/0xAA/checksum); responses arrive as notifications and
-are parsed at **index 2** (cmd at index 1). Binding/hardware-info uses characteristic **AF02**:
+`[0x12, cmd, …LE-payload]` (no length/0xAA/checksum); responses arrive as notifications.
+Binding/hardware-info uses characteristic **AF02**.
+
+> **Verified on hardware (MP305B).** The first byte is a **routing/address byte**, not a fixed
+> constant: read it as `(src<<4)|dest` nibbles with **host = 1**. Commands are `0x12`
+> (host 1 → controller 2). Responses reverse it *per transport*: **USB-HID answers `0x21`**
+> (controller 2 → host 1), **BLE AF01 answers `0x31`** (BLE bridge 3 → host 1). So an AF01
+> response frame is `[0x31, cmd, …payload]` — cmd at index 1. AF02 handshake frames
+> (`0x19` bind-resp, `0xE1` hw-info) are bare (cmd at index 0). `parse_ble_notification`
+> accepts `0x12`/`0x31` framed vs bare.
+>
+> **Binding is touch-gated:** the device shows a prompt on its screen and the user must accept
+> before the bind (`0x19`) completes. **Remote *control* over BLE is not granted by
+> `remoteCon=2`** the way USB is — a BLE `remoteCon=2` gets no `0xC9` at all, and `remoteCon=1`
+> is rejected (`31 c9 01`, status 1). BLE reads (info/state/settings) work fully; BLE *control*
+> appears to require enabling remote control on the device itself (wireless-safety gating) and
+> is not yet confirmed.
 
 1. Write binding `[0x18, …16 random bytes, fastBinding=0, status=0]` to AF02.
-2. Device replies on AF02 with `[0x19, status, …]`.
+2. Device replies on AF02 with `[0x19, status, …]` — **after the user accepts on the touch screen**.
 3. Write `[0xE0]` to AF02 (after ~0.5 s); device replies `[0xE1, …]`.
 
 AF02 handshake frames start with the command byte itself (cmd at index 0). The BLE

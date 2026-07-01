@@ -36,7 +36,8 @@ REPORT_SIZE = 64            # output report payload size (zero padded)
 
 FRAME_START = 0xAA
 GROUP_ID = 0x12             # host -> device command group
-RESP_GROUP_ID = 0x21       # device -> host response group (observed on real MP305B hardware)
+RESP_GROUP_ID = 0x21       # device -> host response group over USB-HID (real MP305B)
+BLE_RESP_GROUP = 0x31      # device -> host response group on BLE char AF01 (real MP305B)
 
 # ---- command bytes -------------------------------------------------------
 CMD_HW_INFO        = 0xE0   # -> 0xE1
@@ -214,6 +215,9 @@ def parse_ble_notification(data: bytes) -> Frame | None:
     b = bytes(data)
     if len(b) < 1:
         return None
-    if b[0] == GROUP_ID and len(b) >= 2:
+    # AF01 frames are [group, cmd, payload]: 0x12 on commands, 0x31 on responses
+    # (verified on MP305B hardware — same command/response group split as USB's
+    # 0x12/0x21). AF02 handshake frames (0x19 bind-resp, 0xE1 hw-info) are bare.
+    if b[0] in (GROUP_ID, BLE_RESP_GROUP) and len(b) >= 2:
         return Frame(cmd=b[1], payload=b[2:], values=b)
     return Frame(cmd=b[0], payload=b[1:], values=b)

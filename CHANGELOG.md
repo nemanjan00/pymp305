@@ -17,6 +17,13 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   pair with `read_pdo()` to get the voltage points the source currently offers.
 
 ### Fixed
+- **BLE transport works for the first time.** On BLE char AF01 the device answers with
+  routing byte **`0x31`** (not the `0x12` used on commands — same host/controller addressing
+  as USB's `0x12`/`0x21`, but the BLE bridge is address 3). `parse_ble_notification` matched
+  only `0x12`, so every BLE state/settings response was misparsed. Now accepts `0x31`.
+  Verified on an MP305B: connect → touch-accept bind → `hardware_info`/`read_state`/
+  `read_system_settings` all decode over Bluetooth. (BLE *control* is not yet confirmed —
+  `remoteCon=2` is unanswered over BLE; remote control likely must be enabled on the device.)
 - **CV/CC regulation status was inverted.** `outState` is `1 = CV, 2 = CC` on real hardware
   (measured with a 390 Ω load); the GUI and simulator had it backwards, so the dashboard
   labelled CV as CC. Fixed the GUI, the sim backend, and PROTOCOL.md.
