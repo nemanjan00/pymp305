@@ -62,6 +62,7 @@ RESP_SYS            = 0xC5
 RESP_SYS_SET        = 0xC7
 RESP_CONTROL        = 0xC9
 RESP_CHARGE         = 0xED
+RESP_CHARGE_CONTROL = 0xEF   # answer to the 0xEE charge start/stop command
 RESP_CHARGE_INFO    = 0xEB
 RESP_PDO            = 0xD1
 RESP_PDO_CONNECT    = 0xE9

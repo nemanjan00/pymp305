@@ -126,9 +126,15 @@ def test_e2e_write_program_request():
 
 
 def test_e2e_pdo_connect_request():
-    psu = MP305(FakeHID([_resp(P.RESP_PDO_CONNECT, b"\x00")]))
+    # pdo_connect goes through the shared remote handshake first (0xC8 remoteCon=2)
+    psu = MP305(FakeHID([
+        _resp(P.RESP_CONTROL, b"\x00"),       # remote request granted
+        _resp(P.RESP_PDO_CONNECT, b"\x00"),   # pdo connect accepted
+    ]))
     psu.pdo_connect(C.PDOConnect(pdo_index=2, output=1))
-    f = P.parse_report(psu._dev.written[0])
+    req = P.parse_report(psu._dev.written[0])
+    assert req.cmd == P.CMD_CONTROL and req.payload[0] == 2    # remote request
+    f = P.parse_report(psu._dev.written[1])
     assert f.cmd == 0xE8 and f.payload[1] == 2     # pdo_index low byte
 
 

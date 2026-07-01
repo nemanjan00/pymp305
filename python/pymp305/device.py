@@ -281,8 +281,8 @@ class MP305:
             self._remote_held = False
             self._ensure_remote(timeout_ms)
             f = self.control(cmd, timeout_ms=timeout_ms)
-        if self._control_status(f) not in (0, 2):
-            raise MP305Error(f"control command rejected (0xC9 status {self._control_status(f)})")
+            if self._control_status(f) == 1:
+                raise MP305Error("control command rejected: device refused remote control")
         return self.read_state(timeout_ms=timeout_ms)
 
     def output_on(self, **kw) -> State:
@@ -297,11 +297,29 @@ class MP305:
         self._remote_held = False
         return f
 
+    def _connect(self, cmd: int, expect: int, payload: bytes, timeout_ms: int) -> P.Frame:
+        """Send a mode connect/control command that requires remote control.
+
+        Does the two-step handshake and honours the status byte, which is shared
+        by every connect response (0xC9/0xE3/0xE9/0xEF). Following WebLink, only
+        status 1 means "rejected -- this session does not hold remote control";
+        0 is success and any other value is mode-specific and non-fatal. If we
+        see status 1 we re-acquire remote once and retry, then give up."""
+        self._ensure_remote(timeout_ms)
+        f = self.request(cmd, expect, payload, timeout_ms)
+        if self._control_status(f) == 1:
+            self._remote_held = False
+            self._ensure_remote(timeout_ms)
+            f = self.request(cmd, expect, payload, timeout_ms)
+            if self._control_status(f) == 1:
+                raise MP305Error(f"command 0x{cmd:02X} rejected: device refused remote control")
+        return f
+
     def set_system_settings(self, cmd: SystemSetCommand, timeout_ms: int = 1500) -> P.Frame:
         return self.request(P.CMD_SYS_SET, P.RESP_SYS_SET, cmd.payload(), timeout_ms)
 
     def charge(self, cmd: ChargeCommand, timeout_ms: int = 1500) -> P.Frame:
-        return self.request(P.CMD_CHARGE_CONTROL, P.RESP_CHARGE, cmd.payload(), timeout_ms)
+        return self._connect(P.CMD_CHARGE_CONTROL, P.RESP_CHARGE_CONTROL, cmd.payload(), timeout_ms)
 
     def set_language(self, index: int, timeout_ms: int = 1500) -> P.Frame:
         return self.request(P.CMD_SET_LANGUAGE, 0xA3, bytes([index & 0xFF]), timeout_ms)
@@ -323,7 +341,7 @@ class MP305:
 
     def pdo_connect(self, conn: C.PDOConnect, timeout_ms: int = 1500) -> P.Frame:
         cmd, payload = conn.build()
-        return self.request(cmd, P.RESP_PDO_CONNECT, payload, timeout_ms)
+        return self._connect(cmd, P.RESP_PDO_CONNECT, payload, timeout_ms)
 
     def write_pdo(self, pdo_id: int, name: str, power: int, items: list[dict],
                   is_last: int = 1, timeout_ms: int = 1500) -> P.Frame:
@@ -355,7 +373,7 @@ class MP305:
 
     def program_connect(self, conn: C.ProgramConnect, timeout_ms: int = 1500) -> P.Frame:
         cmd, payload = conn.build()
-        return self.request(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout_ms)
+        return self._connect(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout_ms)
 
     def write_program(self, seq_id: int, steps: list[dict], timeout_ms: int = 1500) -> P.Frame:
         """Write a programmable sequence's steps (`0xDA`→`0xDB`). Each step:
