@@ -30,6 +30,11 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   390 Ω load. `MP305BLE.set_output()` now performs the two-step handshake (added
   `request_remote()`/`_ensure_remote()` with a long default timeout for the touch prompt) and a
   `current_over` parameter, mirroring the USB driver.
+- **GUI over-polled the device.** The dashboard polled every 100 ms; the MP305 firmware
+  stops answering when polled much faster than ISDT's ~3 s app and times out after ~1-2 s on
+  both reads (`0xC3`) and control (`0xC9`). Poll interval is now 500 ms; the GUI reads state
+  via `0xC2` directly (this unit ignores the `0xBD` realtime poll) and defers the USB-PD
+  PDO/e-marker reads to USB-PD mode (they added a destabilising 3-4 request burst on connect).
 - **CV/CC regulation status was inverted.** `outState` is `1 = CV, 2 = CC` on real hardware
   (measured with a 390 Ω load); the GUI and simulator had it backwards, so the dashboard
   labelled CV as CC. Fixed the GUI, the sim backend, and PROTOCOL.md.

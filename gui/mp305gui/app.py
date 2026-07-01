@@ -846,7 +846,9 @@ class MainWindow(QWidget):
 
     # ---- worker
     def _start_worker(self):
-        self.thread = QThread(); self.worker = DeviceWorker(self.backend, poll_ms=100)
+        # 500 ms: the MP305 firmware stops answering if polled much faster (100 ms
+        # over-polls and the device chokes after ~1-2 s); ISDT's own app polls ~3 s.
+        self.thread = QThread(); self.worker = DeviceWorker(self.backend, poll_ms=500)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)
         self.worker.state.connect(self._on_state); self.worker.connected.connect(self._on_connected)

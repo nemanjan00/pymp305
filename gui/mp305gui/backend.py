@@ -53,9 +53,15 @@ class RealBackend:
         return {"model": self._name, "fw": info.app_version, "transport": "USB-HID"}
 
     def read(self) -> dict:
-        st = self._psu.read_state()
+        st = self._psu.read_state(realtime=False)   # 0xC2 directly; this unit ignores the 0xBD realtime poll
         d = _state_to_dict(st, self._name)
-        em, pdos = self._caps()
+        # The cable/PDO reads are only relevant in USB-PD mode; doing them on every
+        # connect (a 3-4 request burst) destabilises the firmware, so fetch them
+        # lazily only while in USB-PD mode. In other modes reuse the last values.
+        if st.model == MODE_PD:
+            em, pdos = self._caps()
+        else:
+            em, pdos = getattr(self, "_em", "—"), getattr(self, "_pl", [])
         d["emarker"] = em; d["pdos"] = pdos; d["pdo_sel"] = getattr(self, "_pdo_sel", 0)
         d["chem"] = getattr(self, "_chem", 0); d["cells"] = getattr(self, "_cells", 1)
         d["charge_current"] = getattr(self, "_charge_a", 0.0)
