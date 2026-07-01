@@ -58,6 +58,12 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   (mirrors WebLink).
 
 ### Notes
+- **USB-PD source control verified** (with a 15 V PD trigger as sink): the MP305 advertised
+  and sourced the negotiated 15 V. The output toggle **must** use `updateBool=0`
+  (`updateBool=1` is only for changing the advertised set); combining `update=1`+`output=1`
+  is ignored by the device. Negotiated voltage appears in `read_state().voltage`. There is no
+  remote command to *select* the active power profile (0xE4 is read-only) — profiles are edited
+  via write_pdo or chosen on the device.
 - **Device quirk (MP305B, app V1.6.0.46):** lowering the current limit while the output is
   already on does **not** engage CC — the CC threshold only re-arms on output-enable (raising
   the limit live works fine). Verified against ISDT's WebLink protocol: it sends the identical
