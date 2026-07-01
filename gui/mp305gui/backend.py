@@ -31,8 +31,9 @@ def _pdo_label(it: dict) -> str:
 
 
 def _pdo_view(items):
-    """Shape decoded PDO items for the GUI: [{'label','checked'}] (source advertise-set)."""
-    return [{"label": _pdo_label(it), "checked": bool(it.get("type"))} for it in items]
+    """Shape decoded PDO items for the GUI: [{'label','checked','v'}] (source advertise-set)."""
+    return [{"label": _pdo_label(it), "checked": bool(it.get("type")),
+             "v": float(it.get("voltage_v", 0) or 0)} for it in items]
 
 
 # simulator source PDOs (mirrors a real 60 W source: 5 fixed + APDO range + SPR-AVS)

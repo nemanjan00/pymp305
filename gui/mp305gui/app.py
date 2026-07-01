@@ -775,10 +775,7 @@ class MainWindow(QWidget):
         self.pd_out_btn = OutputButton("⚡   PD OUTPUT ON", "⚡   ENABLE PD OUTPUT")
         self.pd_out_btn.toggled.connect(self._on_pd_output)
         v.addWidget(self.pd_out_btn)
-        self.pd_pick_lbl = QLabel("negotiated:  —"); self.pd_pick_lbl.setFont(mono(15))
-        self.pd_pick_lbl.setStyleSheet(f"color:{C['warn']};")
-        v.addWidget(self.pd_pick_lbl)
-        v.addWidget(_lab("ADVERTISED PROFILES  ·  tap to toggle", "cardTitle"))
+        v.addWidget(_lab("ADVERTISED  ·  tap to toggle  ·  yellow = negotiated", "cardTitle"))
         self._pdo_wrap = QVBoxLayout(); self._pdo_wrap.setSpacing(6); v.addLayout(self._pdo_wrap)
         self._pdo_btns = []
         v.addStretch(1)
@@ -826,19 +823,26 @@ class MainWindow(QWidget):
             self._prog_wrap.addWidget(lbl); self._prog_lbls.append(lbl)
 
     _PDO_TOGGLE_CSS = (
-        "QPushButton{{background:{card};border:1px solid {stroke};border-radius:9px;"
+        "QPushButton{{background:{card};border:{bw}px solid {border};border-radius:9px;"
         "font-weight:700;padding:9px;text-align:left;padding-left:14px;color:{text};}}"
         "QPushButton:hover{{background:{hover};}}"
-        "QPushButton:checked{{background:{accent};color:{panel};border:none;}}"
-        "QPushButton:disabled{{background:{accent};color:{panel};border:none;}}"
+        "QPushButton:checked{{background:{accent};color:{text};border:{bw}px solid {border};}}"
+        "QPushButton:disabled{{background:{accent};color:{text};border:{bw}px solid {border};}}"
     )
+
+    def _pdo_css(self, negotiated):
+        if negotiated:   # yellow letters + border = the voltage a sink negotiated
+            return self._PDO_TOGGLE_CSS.format(card=C['card_hi'], border=C['warn'], bw=2,
+                                               hover=C['hover'], accent=C['accent'], text=C['warn'])
+        return self._PDO_TOGGLE_CSS.format(card=C['card_hi'], border=C['stroke'], bw=1,
+                                           hover=C['hover'], accent=C['accent'], text=C['text'])
 
     def _rebuild_pdos(self, pdos):
         for b in self._pdo_btns:
             b.setParent(None)
         self._pdo_btns = []
-        css = self._PDO_TOGGLE_CSS.format(card=C['card_hi'], stroke=C['stroke'], hover=C['hover'],
-                                          accent=C['accent'], panel=C['panel'], text=C['text'])
+        self._pdo_v = [float(item.get("v", 0) or 0) for item in pdos]
+        css = self._pdo_css(False)
         for i, item in enumerate(pdos):
             b = QPushButton(item["label"]); b.setCheckable(True); b.setFixedHeight(40)
             b.setChecked(bool(item["checked"])); b.setStyleSheet(css)
@@ -1135,11 +1139,12 @@ class MainWindow(QWidget):
             for i, item in enumerate(pdos):     # keep labels fresh (values), not toggle state
                 self._pdo_btns[i].setText(item["label"])
         self._emark_lab.setText(str(st.get("emarker", "—")))
-        nv, na = st.get("voltage", 0.0), st.get("current", 0.0)
-        if st.get("output") and nv > 0.3:
-            self.pd_pick_lbl.setText(f"negotiated:  {nv:.2f} V   ·   {na:.3f} A")
-        else:
-            self.pd_pick_lbl.setText("negotiated:  —  (no sink drawing)")
+        # mark the advertised voltage a sink has negotiated (measured output) in yellow
+        neg_v = st.get("voltage", 0.0) if st.get("output") else 0.0
+        pv = getattr(self, "_pdo_v", [])
+        for i, b in enumerate(self._pdo_btns):
+            vi = pv[i] if i < len(pv) else 0.0
+            b.setStyleSheet(self._pdo_css(vi > 0 and abs(vi - neg_v) < 0.7))
         # Program panel: step list, current step highlighted, run state on the button
         steps = st.get("program_steps", [])
         if len(self._prog_lbls) != len(steps):
