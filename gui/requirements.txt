@@ -4,3 +4,4 @@ pyqtgraph>=0.13
 # the driver itself (use the sibling checkout, or: pip install pymp305)
 pymp305>=0.3
 hidapi>=0.14        # for the USB-HID backend (not needed for --demo)
+bleak>=0.21         # for the Bluetooth backend (--ble; not needed for USB/--demo)

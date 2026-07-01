@@ -20,9 +20,16 @@ move the voltage on a live DUT).
 ```bash
 cd gui
 pip install -r requirements.txt
-python run.py            # auto: real MP305 if present, else the simulator
+python run.py            # auto: real MP305 over USB if present, else the simulator
+python run.py --usb      # force USB-HID
+python run.py --ble      # force Bluetooth (accept the prompt on the device screen)
 python run.py --demo     # force the simulator
 ```
+
+You can also switch transport live from the **USB / Bluetooth / Simulator** selector in the
+top bar (while disconnected). Over Bluetooth the MP305 shows an on-screen **bind** prompt (on
+connect) and a **remote-control** prompt (the first time you take control) — accept both on the
+device. BLE needs `bleak` (installed by `requirements.txt`).
 
 ## On screen
 
@@ -80,7 +87,10 @@ Tap any value to open the on-screen keypad — digits **and** unit buttons, exac
 
 ## Architecture
 
-- `mp305gui/backend.py` — `RealBackend` (wraps `pymp305.MP305`) + `SimBackend`, same surface.
+- `mp305gui/backend.py` — `RealBackend` (USB, wraps `pymp305.MP305`), `BleBackend` (Bluetooth,
+  wraps `pymp305.MP305BLE` via a sync-bridge so the async API looks synchronous) and
+  `SimBackend`, all the same surface. `BleBackend` subclasses `RealBackend` — the shared logic
+  is transport-agnostic.
 - `mp305gui/worker.py` — a `QThread` worker; all (blocking) device I/O runs off the UI thread.
 - `mp305gui/app.py` — the dashboard, custom widgets (output button, channel cards, keypad,
   CV|CC indicator, battery, temp gauge, lamps), charts.

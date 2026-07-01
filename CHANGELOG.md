@@ -22,9 +22,17 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 - Docs (root / `python/` / `gui/` READMEs, PROTOCOL notes) updated to reflect what is verified.
 
 ### GUI
+- **Bluetooth backend** — the GUI can now drive the MP305 over BLE, not just USB. A
+  **USB / Bluetooth / Simulator** selector in the top bar switches transport (while
+  disconnected), or launch with `run.py --ble`. `BleBackend` wraps `MP305BLE` through a
+  sync-bridge (a dedicated asyncio loop thread), reusing all of `RealBackend`'s per-mode logic.
 - Refreshed all screenshots on the current dark theme; added a **Program-mode** screenshot
   (button-group step editor). The dashboard shot is real MP305B hardware.
 - Fixed two hint labels that clipped in the left panel (PD "set on device", Program header).
+
+### Library
+- `MP305BLE.set_mode()` and `MP305BLE.read_pdo_index()` — BLE parity with the USB driver
+  (needed for full mode support over Bluetooth in the GUI).
 
 ## 0.6.1
 

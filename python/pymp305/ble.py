@@ -189,6 +189,12 @@ class MP305BLE:
         f = await self.request(cmd, P.RESP_PDO, payload, timeout)
         return PDO.parse(f.values, index=_IDX)
 
+    async def read_pdo_index(self, timeout: float = 2.0) -> int:
+        """The device's active USB-PD source-profile index (0xE4 -> 0xE5).
+        Pair with read_pdo() to get the voltage points the source currently offers."""
+        f = await self.request(0xE4, 0xE5, timeout=timeout)
+        return f.payload[0] if f.payload else 0
+
     async def read_program_state(self, timeout: float = 2.0) -> ProgramState:
         cmd, payload = C.programmable_info()
         f = await self.request(cmd, P.RESP_PROGRAM_STATE, payload, timeout)
@@ -259,6 +265,55 @@ class MP305BLE:
         f = await self.control(ControlCommand(remote_con=0), timeout=timeout)
         self._remote_held = False
         return f
+
+    # mode switch is sent through the CURRENT mode's connect command (same as USB)
+    _MODE_CONNECT = {
+        0: (P.CMD_CONTROL,        P.RESP_CONTROL),          # DC PSU
+        1: (0xE2,                 P.RESP_PROGRAM_CONNECT),  # programmable
+        2: (0xE8,                 P.RESP_PDO_CONNECT),      # USB-PD
+        3: (P.CMD_CHARGE_CONTROL, P.RESP_CHARGE_CONTROL),   # charge
+    }
+
+    def _mode_payload(self, mode: int, remote_con: int, new_model: int,
+                      st: "State | None" = None) -> bytes:
+        """Payload for `mode`'s connect command carrying `remote_con` and selecting
+        `new_model` (output off). Leaving DC with remote_con=1 preserves the DC
+        setpoint from `st` (mirrors device.py._mode_payload)."""
+        if mode == 0:
+            cc = ControlCommand(remote_con=remote_con, model=new_model, output=0)
+            if st is not None:
+                cc.set_voltage, cc.set_current = st.set_voltage, st.set_current
+                cc.voltage_slow, cc.current_over = st.voltage_slow, st.current_over
+            return cc.payload()
+        if mode == 1:
+            return C.ProgramConnect(remote_con=remote_con, output=0, model=new_model).build()[1]
+        if mode == 2:
+            return C.PDOConnect(remote_con=remote_con, output=0, model=new_model).build()[1]
+        if mode == 3:
+            return ChargeCommand(remote_con=remote_con, output=0, model=new_model).payload()
+        raise MP305Error(f"unknown model {mode}")
+
+    async def set_mode(self, model: int, timeout: float = 2.0) -> int:
+        """Switch the active mode (0=DC, 1=programmable, 2=USB-PD, 3=charge), acquiring
+        and KEEPING remote (mode persists only while remote is held). Returns the
+        confirmed model. Mirrors device.set_mode over BLE."""
+        if model not in self._MODE_CONNECT:
+            raise MP305Error(f"unknown model {model} (expected 0/1/2/3)")
+        st = await self.read_state(timeout=timeout)
+        cur = st.model
+        await self._ensure_remote(timeout)
+        if cur == model:
+            return model
+        cmd, expect = self._MODE_CONNECT[cur]
+        await self.request(cmd, expect,
+                           self._mode_payload(cur, 1, model, st=st if cur == 0 else None), timeout)
+        last = cur
+        for _ in range(6):                            # the state frame lags the switch by ~1 read
+            last = (await self.read_state(timeout=timeout)).model
+            if last == model:
+                return model
+            await asyncio.sleep(0.1)
+        raise MP305Error(f"mode switch to {model} not confirmed (still {last})")
 
     async def set_system_settings(self, cmd: SystemSetCommand, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_SYS_SET, P.RESP_SYS_SET, cmd.payload(), timeout)

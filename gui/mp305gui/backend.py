@@ -6,9 +6,11 @@ Both expose the same tiny surface the worker needs:
 """
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import sys
+import threading
 import time
 
 # make the sibling library importable when run from a checkout
@@ -240,6 +242,85 @@ class RealBackend:
             pass
 
 
+class _SyncBLE:
+    """Bridge MP305BLE's async API to the sync surface the worker expects: run a dedicated
+    asyncio loop on its own thread and marshal every call onto it via run_coroutine_threadsafe.
+    bleak requires all operations to share the loop the client was created on — this guarantees
+    it. Attribute access proxies to the wrapped MP305BLE: coroutine methods become blocking
+    calls, plain attributes (e.g. `hardware`) pass through."""
+
+    def __init__(self):
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True,
+                                        name="mp305-ble-loop")
+        self._thread.start()
+        self._ble = None
+
+    def _run(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def open(self, **kw):
+        from pymp305.ble import MP305BLE
+        self._ble = self._run(MP305BLE.open(**kw))
+        return self
+
+    def __getattr__(self, name):
+        ble = object.__getattribute__(self, "_ble")
+        if ble is None:
+            raise AttributeError(name)
+        attr = getattr(ble, name)
+        if asyncio.iscoroutinefunction(attr):
+            def wrapper(*a, **k):
+                return self._run(attr(*a, **k))
+            return wrapper
+        return attr
+
+    def stop(self):
+        self._loop.call_soon_threadsafe(self._loop.stop)
+
+
+class BleBackend(RealBackend):
+    """Same as RealBackend, but driven over Bluetooth (`pymp305.MP305BLE`). RealBackend only
+    ever calls `self._psu.<method>()` with signatures the BLE class matches, so swapping in a
+    sync-bridged MP305BLE gets every mode for free. Note: BLE binding + remote control are
+    gated by an on-device touch prompt (accept it on the MP305 screen)."""
+    name = "BLE"
+
+    def __init__(self):
+        super().__init__()
+        self._sync = None
+
+    def connect(self) -> dict:
+        if self._sync is not None:
+            try: self._sync.stop()
+            except Exception: pass
+            self._sync = None
+        self._sync = _SyncBLE()
+        try:
+            self._psu = self._sync.open(timeout=20.0)   # scan + connect + bind (device prompts)
+        except Exception:
+            self._sync.stop(); self._sync = None; raise
+        info = getattr(self._psu, "hardware", None)      # bind may already have fetched it
+        for _ in range(4):
+            if info is not None:
+                break
+            try:
+                info = self._psu.hardware_info(); break
+            except Exception:
+                time.sleep(0.4)
+        if info is None:
+            info = self._psu.hardware_info()             # last try; raise if truly unresponsive
+        self._name = info.device_name or "MP305"
+        return {"model": self._name, "fw": info.app_version, "transport": "BLE"}
+
+    def close(self):
+        try:
+            super().close()
+        finally:
+            if self._sync is not None:
+                self._sync.stop(); self._sync = None
+
+
 class SimBackend:
     """A plausible PSU simulator: CV/CC against a switchable load, noise, thermal drift,
     energy integration — enough to make the dashboard and charts feel real."""
@@ -409,13 +490,28 @@ class SimBackend:
         self.on = False
 
 
-def make_backend(prefer_real: bool):
-    """Return (backend, is_real). Falls back to the simulator if no device / not requested."""
-    if prefer_real:
-        try:
-            from pymp305 import MP305
-            if MP305.list_devices():
-                return RealBackend(), True
-        except Exception:
-            pass
+def make_backend(transport="auto"):
+    """Return (backend, is_real) for a transport: 'usb', 'ble', 'sim'/'demo', or 'auto'
+    (USB if a device is present, else the simulator). `is_real` is False only for the sim.
+    Explicit 'usb'/'ble' return that backend even if no device is present — connect() then
+    raises and the GUI surfaces the error (rather than silently falling back to the sim)."""
+    t = str(transport or "auto").lower()
+    if t in ("sim", "demo", "simulator"):
+        return SimBackend(), False
+    if t in ("ble", "bluetooth"):
+        return BleBackend(), True
+    if t == "usb":
+        return RealBackend(), True
+    # auto: prefer a plugged-in USB device, else the simulator
+    try:
+        from pymp305 import MP305
+        if MP305.list_devices():
+            return RealBackend(), True
+    except Exception:
+        pass
     return SimBackend(), False
+
+
+# back-compat: earlier callers passed a bool (prefer_real)
+def _backend_from_prefer(prefer_real: bool):
+    return make_backend("auto" if prefer_real else "sim")

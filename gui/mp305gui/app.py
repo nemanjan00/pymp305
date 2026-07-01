@@ -23,6 +23,7 @@ from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPolygonF, QPainterPath
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QFrame, QLabel, QPushButton, QHBoxLayout, QVBoxLayout,
     QGridLayout, QDialog, QPlainTextEdit, QSizePolicy, QStackedWidget, QButtonGroup,
+    QComboBox,
 )
 
 from .theme import C, STYLESHEET
@@ -592,7 +593,7 @@ class MainWindow(QWidget):
     reqSelectPDO = pyqtSignal(int); reqPdOutput = pyqtSignal(bool); reqProgram = pyqtSignal(bool)
     reqWriteProgram = pyqtSignal(list)
 
-    def __init__(self, prefer_real=True):
+    def __init__(self, prefer_real=True, transport=None):
         super().__init__()
         self.setObjectName("root")
         self.setWindowTitle("MP305 — ISDT bench supply")
@@ -602,7 +603,8 @@ class MainWindow(QWidget):
         self._connected = False; self._remote_held = True; self._output_on = False
         self._t0 = time.monotonic()
         self._t = deque(maxlen=900); self._v = deque(maxlen=900); self._i = deque(maxlen=900)
-        self.backend, self.is_real = make_backend(prefer_real)
+        self._transport = (transport or ("auto" if prefer_real else "sim"))
+        self.backend, self.is_real = make_backend(self._transport)
         self._build_ui(); self._start_worker()
         self._pow_eased = EasedValue(lambda v: self.r_pow[1].setText(f"{v:.2f}"))
         self.batt.clicked.connect(self._toggle_charge)
@@ -666,17 +668,40 @@ class MainWindow(QWidget):
         h = QHBoxLayout(bar); h.setContentsMargins(18, 0, 16, 0); h.setSpacing(10)
         h.addWidget(_lab("⚡ MP305", "h1")); h.addStretch(1)
         self.badge = QLabel(); self.devlabel = _lab("—", "sub"); self.status = QLabel()
-        self._set_badge("SIM" if not self.is_real else "USB", C["warn"] if not self.is_real else C["on"])
+        self._set_badge(self.backend.name, C["warn"] if not self.is_real else C["on"])
         self._set_status("○ Disconnected", C["muted"], tint=False)
+        # transport selector — takes effect on the next Connect (locked while connected)
+        self.cbo_transport = QComboBox(); self.cbo_transport.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cbo_transport.setToolTip("Transport — pick before connecting")
+        for label, key in (("USB", "usb"), ("Bluetooth", "ble"), ("Simulator", "sim")):
+            self.cbo_transport.addItem(label, key)
+        self.cbo_transport.setCurrentIndex({"USB": 0, "BLE": 1, "SIM": 2}.get(self.backend.name, 0))
+        self.cbo_transport.currentIndexChanged.connect(self._on_transport_changed)
         self.btn_remote = QPushButton("Remote"); self.btn_remote.setCheckable(True); self.btn_remote.setChecked(True)
         self.btn_remote.setToolTip("Take / release remote control (front panel lockout)")
         self.btn_remote.toggled.connect(self._on_remote_toggle); self._style_remote(True)
         self.btn_conn = QPushButton("Connect"); self.btn_conn.setObjectName("primary")
         self.btn_conn.clicked.connect(self._toggle_conn)
         self.batt = BatteryWidget(); self.batt.setToolTip("Internal cell — click to start / stop charging")
-        for w in (self.batt, self.badge, self.devlabel, self.status, self.btn_remote, self.btn_conn):
+        for w in (self.batt, self.badge, self.devlabel, self.status,
+                  self.cbo_transport, self.btn_remote, self.btn_conn):
             h.addWidget(w)
         return bar
+
+    def _on_transport_changed(self, _idx):
+        """Swap the backend (while disconnected) so the next Connect uses the chosen transport.
+        Safe because polling is stopped when disconnected — the idle worker just gets a new
+        backend reference."""
+        if self._connected:
+            return
+        key = self.cbo_transport.currentData()
+        if key == self._transport:
+            return
+        self._transport = key
+        self.backend, self.is_real = make_backend(key)
+        self.worker.backend = self.backend
+        self._set_badge(self.backend.name, C["warn"] if not self.is_real else C["on"])
+        self._logline(f"transport → {self.backend.name}", C["muted"])
 
     def _left_column(self):
         col = QFrame(); col.setFixedWidth(360)
@@ -1053,6 +1078,7 @@ class MainWindow(QWidget):
             # won't switch modes with a live output — mirror that lockout in the UI)
             b.setEnabled(self._connected and not self._output_on)
         self.btn_remote.setEnabled(self._connected)
+        self.cbo_transport.setEnabled(not self._connected)   # lock transport while connected
 
     def _on_remote_toggle(self, held):
         self._style_remote(held)
@@ -1100,7 +1126,7 @@ class MainWindow(QWidget):
     def _on_connected(self, info):
         self._set_status("● Connected", C["on"])
         self.devlabel.setText(f"{info.get('model','MP305')}  ·  {info.get('fw','')}")
-        self._set_badge("SIM" if not self.is_real else "USB", C["warn"] if not self.is_real else C["on"])
+        self._set_badge(self.backend.name, C["warn"] if not self.is_real else C["on"])
         self.btn_conn.setText("Disconnect"); self._set_enabled(True); self._init_sp = False
         self._logline(f"connected — {info.get('model','MP305')} {info.get('fw','')}", C["on"])
 
@@ -1231,8 +1257,8 @@ class MainWindow(QWidget):
         e.accept()
 
 
-def run(prefer_real=True):
+def run(prefer_real=True, transport=None):
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(STYLESHEET)
-    win = MainWindow(prefer_real=prefer_real); win.show()
+    win = MainWindow(prefer_real=prefer_real, transport=transport); win.show()
     return app.exec()
