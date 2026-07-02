@@ -30,6 +30,7 @@ C = {
 STYLESHEET = f"""
 * {{ font-family: "Inter", "Segoe UI", "Bahnschrift", sans-serif; color: {C['text']}; }}
 QWidget#root {{ background: {C['bg']}; }}
+QDialog {{ background: {C['bg']}; }}   /* keypad + pickers — else they use the light system palette */
 QFrame.card {{
     background: {C['card']}; border: 1px solid {C['stroke']}; border-radius: 14px;
 }}
@@ -70,6 +71,18 @@ QSlider::handle:horizontal:hover {{ background: {C['accent']}; }}
 QLabel#pill {{
     background: {C['card_hi']}; border: 1px solid {C['stroke']}; border-radius: 11px;
     padding: 3px 12px; font-size: 12px; font-weight: 700; color: {C['muted']};
+}}
+QComboBox {{
+    background: {C['card_hi']}; border: 1px solid {C['stroke']}; border-radius: 10px;
+    padding: 8px 12px; font-weight: 700; min-width: 92px; color: {C['text']};
+}}
+QComboBox:hover {{ background: {C['stroke']}; }}
+QComboBox:disabled {{ color: {C['muted']}; background: {C['card']}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: {C['card']}; border: 1px solid {C['stroke']}; border-radius: 8px;
+    color: {C['text']}; selection-background-color: {C['accent']}; selection-color: {C['panel']};
+    outline: none; padding: 4px;
 }}
 QToolTip {{ background: {C['card']}; color: {C['text']}; border: 1px solid {C['stroke']}; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 2px 2px 0; }}

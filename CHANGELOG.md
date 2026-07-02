@@ -26,8 +26,12 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
   **USB / Bluetooth / Simulator** selector in the top bar switches transport (while
   disconnected), or launch with `run.py --ble`. `BleBackend` wraps `MP305BLE` through a
   sync-bridge (a dedicated asyncio loop thread), reusing all of `RealBackend`'s per-mode logic.
+- **Dark keypad/dialog fix** — the keypad and pickers were falling back to the light system
+  palette (a `QDialog` background rule was missing); they now match the dark theme. Styled the
+  transport selector to match too.
 - Refreshed all screenshots on the current dark theme; added a **Program-mode** screenshot
-  (button-group step editor). The dashboard shot is real MP305B hardware.
+  (button-group step editor) and the top-bar transport selector. The dashboard shot is real
+  MP305B hardware.
 - Fixed two hint labels that clipped in the left panel (PD "set on device", Program header).
 
 ### Library
