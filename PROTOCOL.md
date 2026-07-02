@@ -61,13 +61,22 @@ index 5. Responses generally use `request_cmd + 1`.
 > real, dispatched command (there's an explicit `cmp 0xBD` branch), but its handler only
 > mutates an internal state byte and returns via a path that *bypasses the response-transmit
 > call* (`0x15464`) that every replying command (`0xC2`/`0xC4`/`0xC8`/`0xD*`/`0xE*`) goes
-> through. So it is **fire-and-forget: no `0xC3` ever comes back**, and (verified empirically)
-> it does **not** start any asynchronous/streaming push either — after sending `0xBD` the
-> device emits nothing. WebLink itself only sends `0xBD` as a slow 3 s **USB-only** background
-> poke *when off the info screen*, and never checks for a reply; its real state poll on the
-> live screen is `0xC2`. **Use `0xC2`** (same `0xC3` frame, same measured V/I) as the primary
-> state read — that is `read_state()`'s default; `realtime=True` opts into `0xBD` but falls
-> back to `0xC2` on the inevitable timeout.
+> through. So it is **fire-and-forget: no `0xC3` ever comes back**.
+>
+> The firmware *does* contain a dormant timer-driven telemetry push (a scheduler task with
+> 500 ms / 3000 ms cadences that can transmit `0xC3` unsolicited), but it is gated on a
+> stream-config value that only `0xBD`'s **undocumented longer sub-commands** set (`byte[3]==5/6`
+> write the config struct the pusher reads; the plain `byte[3]==1` poll writes a *different*
+> byte the pusher ignores). WebLink never sends those sub-commands, so the push never activates.
+> **Verified empirically:** after a plain `0xBD` the device emits nothing — in DC **and** in
+> USB-PD mode (model 2, with a live PD sink), 0 unsolicited frames over 8 s — which also rules
+> out the push being gated merely on the USB-PD connection model.
+>
+> WebLink only sends `0xBD` as a slow 3 s **USB-only** background poke *when off the info
+> screen*, and never checks for a reply; its real state poll on the live screen is `0xC2`.
+> **Use `0xC2`** (same `0xC3` frame, same measured V/I) as the primary state read — that is
+> `read_state()`'s default; `realtime=True` opts into `0xBD` but falls back to `0xC2` on the
+> inevitable timeout.
 
 ## Commands (CMD byte) and responses
 
