@@ -211,12 +211,18 @@ class MP305:
             self.device_name = info.device_name   # cache for model-aware error decoding
         return info
 
-    def read_state(self, realtime: bool = True, timeout_ms: int = 1500) -> State:
+    def read_state(self, realtime: bool = False, timeout_ms: int = 1500) -> State:
         """Read the live measurement/state frame (0xC3).
 
-        Some units (observed: MP305B app V1.6) never answer the realtime poll
-        (0xBD); once that is seen we fall back to the stored-state query (0xC2),
-        which returns the same 0xC3 frame, and remember it for later calls."""
+        By default this uses the state query 0xC2 (`INFO_DATA`) -- the command ISDT's
+        WebLink polls continuously on the live info screen. It carries the same measured
+        V/I as the "realtime" command, so it is the right primary poll.
+
+        `realtime=True` uses 0xBD (`RealTime_DATA`) instead. In WebLink that is only a
+        slow (3 s) USB-only background poke fired when you are *off* the info screen, and
+        it is sent fire-and-forget -- some firmware (observed: MP305B app V1.6) never
+        answers it at all. If the realtime poll times out we fall back to 0xC2, which
+        returns the same 0xC3 frame, and remember it so later reads skip straight to 0xC2."""
         if realtime and not self._no_realtime:
             try:
                 f = self.request(P.CMD_REALTIME, P.RESP_STATE, timeout_ms=timeout_ms)

@@ -56,8 +56,18 @@ index 5. Responses generally use `request_cmd + 1`.
 > **Verified on hardware (MP305B, app V1.6.0.46):** responses carry group id **`0x21`** at
 > index 2, not the `0x12` used on commands. The WebLink source only ever builds `0x12`
 > frames, so this was missed until first hardware contact; `parse_report` accepts both.
-> The realtime poll `0xBD` is **not answered** by this unit — use `0xC2` (same `0xC3`
-> response) instead; `read_state()` falls back automatically.
+>
+> **`0xBD` (`RealTime_DATA`) never replies — root cause confirmed in firmware.** It is a
+> real, dispatched command (there's an explicit `cmp 0xBD` branch), but its handler only
+> mutates an internal state byte and returns via a path that *bypasses the response-transmit
+> call* (`0x15464`) that every replying command (`0xC2`/`0xC4`/`0xC8`/`0xD*`/`0xE*`) goes
+> through. So it is **fire-and-forget: no `0xC3` ever comes back**, and (verified empirically)
+> it does **not** start any asynchronous/streaming push either — after sending `0xBD` the
+> device emits nothing. WebLink itself only sends `0xBD` as a slow 3 s **USB-only** background
+> poke *when off the info screen*, and never checks for a reply; its real state poll on the
+> live screen is `0xC2`. **Use `0xC2`** (same `0xC3` frame, same measured V/I) as the primary
+> state read — that is `read_state()`'s default; `realtime=True` opts into `0xBD` but falls
+> back to `0xC2` on the inevitable timeout.
 
 ## Commands (CMD byte) and responses
 
@@ -65,7 +75,7 @@ index 5. Responses generally use `request_cmd + 1`.
 |-----------|-----|------|--------------|--------------|
 | → | `0xE0` | Hardware info request | — | `0xE1` HardwareInfoResp |
 | → | `0xC2` | Device/state info request | — | `0xC3` State (DP3005Resp) |
-| → | `0xBD` | Realtime poll (app polls every 3 s) | — | `0xC3` State |
+| → | `0xBD` | Realtime poke (fire-and-forget; **no reply** — see note above) | — | *(none)* |
 | → | `0xC4` | System-settings request | — | `0xC5` SystemState (DPStateResp) |
 | → | `0xC6` | **Set system settings** | see SystemSet | `0xC7` (ok if next byte==0) |
 | → | `0xC8` | **Set output / V / I (control)** | see Control | `0xC9` (ok if next byte==0) |

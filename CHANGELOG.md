@@ -6,6 +6,24 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 > read/write/run, and BLE control are all verified on a physical MP305B (USB & BLE). Charge
 > control (needs a battery pack), the MP305A, and OTA remain unverified — see the README banner.
 
+## 0.6.3
+
+### Changed
+- **`read_state()` now defaults to `realtime=False` (0xC2)** in both USB and BLE. `0xC2`
+  (`INFO_DATA`) is the state poll ISDT's WebLink actually uses on the live info screen, and it
+  carries the same measured V/I. The old `realtime=True` default sent `0xBD` first and ate a
+  ~2 s timeout on the first read / `set_output` / `set_mode` before the `_no_realtime` fallback
+  engaged. `realtime=True` still works (opt-in) and still falls back to `0xC2`.
+
+### Investigated
+- **Root-caused why `0xBD` (`RealTime_DATA`) never replies** (firmware disasm + hardware +
+  WebLink JS): it's a dispatched command whose handler only sets an internal state byte and
+  returns *without* going through the response-transmit path, so no `0xC3` ever comes back.
+  Confirmed it is **not** an async-streaming trigger either (the PSU pushes nothing after it).
+  `0xBD` is only WebLink's slow 3 s USB-only off-screen poke, sent fire-and-forget. See
+  PROTOCOL.md. No functional bug — the existing `0xC2` fallback was already correct; this just
+  makes `0xC2` the default and documents the cause.
+
 ## 0.6.2
 
 ### Verified on hardware (MP305B, app V1.6.0.46)

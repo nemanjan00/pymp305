@@ -41,14 +41,25 @@ def _state_payload(*, volt=1234, setv=2000, cur=1500, setc=3000, out=1, model=0,
 def test_e2e_read_state():
     psu = MP305(FakeHID([_resp(P.RESP_STATE, _state_payload())]))
     st = psu.read_state()
-    assert psu._dev.written[0] == P.build_report(P.CMD_REALTIME)   # polled with 0xBD
+    # default polls with 0xC2 (INFO_DATA) -- WebLink's primary state poll. 0xBD carries the
+    # same 0xC3 frame but is a fire-and-forget background command some firmware never answers.
+    assert psu._dev.written[0] == P.build_report(P.CMD_STATE_INFO)   # 0xC2
     assert abs(st.voltage - 12.34) < 1e-9 and st.output == 1 and st.temperature == 27
 
 
-def test_e2e_read_state_nonrealtime_uses_c2():
+def test_e2e_read_state_realtime_uses_bd():
     psu = MP305(FakeHID([_resp(P.RESP_STATE, _state_payload())]))
-    psu.read_state(realtime=False)
-    assert psu._dev.written[0] == P.build_report(P.CMD_STATE_INFO)  # 0xC2
+    psu.read_state(realtime=True)
+    assert psu._dev.written[0] == P.build_report(P.CMD_REALTIME)     # 0xBD (opt-in)
+
+
+def test_e2e_read_state_realtime_falls_back_to_c2():
+    # realtime=True, but 0xBD is never answered on this firmware (the handler emits no reply):
+    # request() times out -> read_state() falls back to 0xC2 and remembers it (_no_realtime).
+    psu = MP305(FakeHID([_resp(P.RESP_STATE, _state_payload())]))
+    psu._no_realtime = True                                          # simulate "already learned"
+    psu.read_state(realtime=True)
+    assert psu._dev.written[0] == P.build_report(P.CMD_STATE_INFO)   # went straight to 0xC2
 
 
 def test_e2e_hardware_info_sets_model():

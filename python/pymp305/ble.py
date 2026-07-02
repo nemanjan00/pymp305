@@ -168,10 +168,11 @@ class MP305BLE:
         self.hardware = HardwareInfo.parse_ble(f.values)
         return self.hardware
 
-    async def read_state(self, realtime: bool = True, timeout: float = 2.0) -> State:
-        """Read the live state frame (0xC3). Some units (observed: MP305B app V1.6) never
-        answer the realtime poll (0xBD); once that is seen we fall back to the stored-state
-        query (0xC2), which returns the same 0xC3 frame, and remember it for later calls."""
+    async def read_state(self, realtime: bool = False, timeout: float = 2.0) -> State:
+        """Read the live state frame (0xC3). Defaults to the 0xC2 state query (`INFO_DATA`) --
+        WebLink's primary poll, and the only one it uses over BLE. `realtime=True` tries 0xBD
+        (`RealTime_DATA`) first, but that is a USB-only background command some firmware never
+        answers (observed: MP305B app V1.6); on timeout we fall back to 0xC2 and remember it."""
         if realtime and not self._no_realtime:
             try:
                 f = await self.request(P.CMD_REALTIME, P.RESP_STATE, timeout=timeout)
