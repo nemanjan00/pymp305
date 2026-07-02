@@ -75,9 +75,14 @@ index 5. Responses generally use `request_cmd + 1`.
 >
 > **Do not send `0xBD`'s `byte[3]==5/6` sub-commands blind:** the `==5` handler does a
 > `memcpy` into a fixed RAM buffer (`+0x57`) whose length comes from a per-connection context
-> byte, *not* the frame length — a wrong length is a RAM overwrite for no benefit. The command
-> most likely exists only because WebLink ships one `RealTime_DATA` for the whole DP3005 family;
-> realtime may behave differently on other units (e.g. MP305A) — untested.
+> byte, *not* the frame length — a wrong length is a RAM overwrite for no benefit.
+>
+> **Confirmed inert across the whole family** (static trace of every image we hold —
+> MP305A 1.6.0.44, MP305A 1.6.0.47, MP305B 1.6.0.48): all three route `0xBD` through the same
+> inert handler and branch to the `cmp byte[3],2` tail, **never** the response-transmit path
+> that `0xC2`/`0xC8` take. So `0xC2` is the correct state poll on both MP305A and MP305B — no
+> model-specific realtime handling is needed. WebLink ships a single `RealTime_DATA` for the
+> shared DP3005 codebase; on these units it's vestigial (it just pokes a state byte and returns).
 >
 > WebLink only sends `0xBD` as a slow 3 s **USB-only** background poke *when off the info
 > screen*, and never checks for a reply; its real state poll on the live screen is `0xC2`.
