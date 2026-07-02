@@ -63,14 +63,21 @@ index 5. Responses generally use `request_cmd + 1`.
 > call* (`0x15464`) that every replying command (`0xC2`/`0xC4`/`0xC8`/`0xD*`/`0xE*`) goes
 > through. So it is **fire-and-forget: no `0xC3` ever comes back**.
 >
-> The firmware *does* contain a dormant timer-driven telemetry push (a scheduler task with
-> 500 ms / 3000 ms cadences that can transmit `0xC3` unsolicited), but it is gated on a
-> stream-config value that only `0xBD`'s **undocumented longer sub-commands** set (`byte[3]==5/6`
-> write the config struct the pusher reads; the plain `byte[3]==1` poll writes a *different*
-> byte the pusher ignores). WebLink never sends those sub-commands, so the push never activates.
-> **Verified empirically:** after a plain `0xBD` the device emits nothing — in DC **and** in
-> USB-PD mode (model 2, with a live PD sink), 0 unsolicited frames over 8 s — which also rules
-> out the push being gated merely on the USB-PD connection model.
+ On this build `0xBD` is effectively **inert to a host**. There is a separate timer-driven
+> notifier in the firmware, but it does **not** give you a state stream: (1) it is gated on a
+> byte (`0x1fffaaa0+0x2f == 2`) that `0xBD` **never writes** — 0xBD's handler only configures
+> *other* offsets of that struct (its `byte[3]==5/6` sub-commands touch `+3/+4/+0x57`, and the
+> `==2` it does write lands on a *different* struct the notifier doesn't read); and (2) what
+> that notifier emits is a 3-byte `{02,04,xx}` message, not a `0xC3` V/I/W report. **Verified
+> empirically:** after `0xBD` the device emits nothing — in DC **and** USB-PD mode (model 2,
+> live PD sink), 0 unsolicited frames over 8 s. (An earlier revision of this note wrongly
+> claimed the `5/6` sub-commands arm a `0xC3` stream; a full firmware trace falsified that.)
+>
+> **Do not send `0xBD`'s `byte[3]==5/6` sub-commands blind:** the `==5` handler does a
+> `memcpy` into a fixed RAM buffer (`+0x57`) whose length comes from a per-connection context
+> byte, *not* the frame length — a wrong length is a RAM overwrite for no benefit. The command
+> most likely exists only because WebLink ships one `RealTime_DATA` for the whole DP3005 family;
+> realtime may behave differently on other units (e.g. MP305A) — untested.
 >
 > WebLink only sends `0xBD` as a slow 3 s **USB-only** background poke *when off the info
 > screen*, and never checks for a reply; its real state poll on the live screen is `0xC2`.
