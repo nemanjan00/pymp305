@@ -61,6 +61,7 @@ class MP305BLE:
         self.hardware: HardwareInfo | None = None
         self._queue: asyncio.Queue = asyncio.Queue()
         self._remote_held = False
+        self._no_realtime = False   # some units never answer 0xBD; fall back to 0xC2 (see read_state)
 
     # ---- discovery / connection -----------------------------------------
     @staticmethod
@@ -168,8 +169,16 @@ class MP305BLE:
         return self.hardware
 
     async def read_state(self, realtime: bool = True, timeout: float = 2.0) -> State:
-        cmd = P.CMD_REALTIME if realtime else P.CMD_STATE_INFO
-        f = await self.request(cmd, P.RESP_STATE, timeout=timeout)
+        """Read the live state frame (0xC3). Some units (observed: MP305B app V1.6) never
+        answer the realtime poll (0xBD); once that is seen we fall back to the stored-state
+        query (0xC2), which returns the same 0xC3 frame, and remember it for later calls."""
+        if realtime and not self._no_realtime:
+            try:
+                f = await self.request(P.CMD_REALTIME, P.RESP_STATE, timeout=timeout)
+                return State.parse(f.values, index=_IDX, device_name=self.device_name)
+            except MP305Error:
+                self._no_realtime = True   # this unit doesn't answer 0xBD; use 0xC2 from now on
+        f = await self.request(P.CMD_STATE_INFO, P.RESP_STATE, timeout=timeout)
         return State.parse(f.values, index=_IDX, device_name=self.device_name)
 
     async def read_system_settings(self, timeout: float = 2.0) -> SystemSettings:

@@ -33,6 +33,9 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 ### Library
 - `MP305BLE.set_mode()` and `MP305BLE.read_pdo_index()` — BLE parity with the USB driver
   (needed for full mode support over Bluetooth in the GUI).
+- `MP305BLE.read_state()` now has the same `0xBD`→`0xC2` realtime fallback as USB — units that
+  never answer the realtime poll (observed: MP305B app V1.6) no longer hang `set_output()` /
+  `set_mode()` over BLE. **GUI BLE DC control verified on hardware** with this fix.
 
 ## 0.6.1
 

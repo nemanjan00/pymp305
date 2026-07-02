@@ -29,7 +29,13 @@ python run.py --demo     # force the simulator
 You can also switch transport live from the **USB / Bluetooth / Simulator** selector in the
 top bar (while disconnected). Over Bluetooth the MP305 shows an on-screen **bind** prompt (on
 connect) and a **remote-control** prompt (the first time you take control) — accept both on the
-device. BLE needs `bleak` (installed by `requirements.txt`).
+device. BLE needs `bleak` (installed by `requirements.txt`). Connecting takes ~20–30 s (scan +
+bind-accept); the loader covers it.
+
+> If the app is killed uncleanly while on BLE, the device keeps the link open and stops
+> advertising, so the next connect reports "no MP305 BLE device found". Clear it with
+> `bluetoothctl disconnect 0C:3D:5E:…` (your device's address) or just wait ~30 s for the link
+> to time out. A clean Disconnect/quit avoids this.
 
 ## On screen
 
