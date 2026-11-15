@@ -196,6 +196,8 @@ cd gui && pip install -r requirements.txt && python run.py --demo
 Over **USB-HID** frames are `[len, 0xAA, 0x12, paylen, cmd, …LE-payload, checksum]` with
 `0xAA` byte-stuffing; over **BLE** they're just `[0x12, cmd, …LE-payload]`.
 Full field-level spec, units, and error tables: **[PROTOCOL.md](./PROTOCOL.md)**.
+For the MP305B's internal tasks, operating modes, power control, and update path,
+see **[FIRMWARE_ARCHITECTURE.md](./FIRMWARE_ARCHITECTURE.md)**.
 
 ## Repo layout
 
