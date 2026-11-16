@@ -6,6 +6,48 @@ All notable changes to `pymp305`. Versions follow semver (pre-1.0: minor = featu
 > read/write/run, and BLE control are all verified on a physical MP305B (USB & BLE). Charge
 > control (needs a battery pack), the MP305A, and OTA remain unverified — see the README banner.
 
+## 0.6.4
+
+### Fixed
+- **Programmable steps: a final step under 1 s read back unscaled.** `ProgramSteps.parse`
+  treated the last step as the raw end marker when `t // 10 == 0` (any time below 1 s), but
+  the writer only sends raw V/A when `S == 0`. A final 0.1–0.9 s step was written in mV/mA and
+  read back as e.g. `5000` instead of `5.0`. The port came from WebLink's `time / 10 == 0`,
+  which is JS float division, so it only holds for time 0. Parse now uses `t == 0`, the same
+  rule as the writer and WebLink's `0xDA` builder.
+- **Oversized frames no longer wrap silently.** The HID length byte holds `1 + len(data)`, so
+  one frame carries at most 254 data bytes. `build_frame` used to mask it with `& 0xFF`, which
+  sent a corrupt length; it now raises `ValueError` (`protocol.MAX_FRAME_PAYLOAD`).
+  `commands.programmable_write` (one `0xDA` frame) raises past 21 steps
+  (`PROGRAM_MAX_STEPS_PER_FRAME`).
+- **`write_program()` sends long sequences in batches, like WebLink.** Steps go out
+  10 per `0xDA` frame (`commands.PROGRAM_STEPS_PER_WRITE`), each waiting for its `0xDB`, so
+  there is no per-call step limit. A batch refused with a `0xDB` status other than 0/1
+  raises `MP305Error` and the remaining batches are not sent. USB and BLE.
+- **BLE parity with USB.** `MP305BLE.set_output()` gains `reapply=` (cycle the output off→on
+  so a lowered current limit engages CC). The retry after a dropped remote now raises if the
+  device rejects the second attempt too. `request_remote()` goes through the current mode's
+  connect command (`0xC8`/`0xE2`/`0xE8`/`0xEE`) instead of always `0xC8`. `read_state()`
+  tracks the active mode for that.
+
+### Changed
+- **`set_output()` is DC-only and no longer switches modes silently** (USB and BLE). It sent
+  `0xC8` with `model=0` whatever mode the unit was in, which could flip a unit in USB-PD /
+  program / charge mode to DC. `model` now defaults to `None`: outside DC mode the call
+  raises `MP305Error` before sending any control frame. Pass `model=0` to switch to DC
+  explicitly (through `set_mode(0)`, output off) and then apply. Any other `model` value is
+  rejected; use `set_mode()`. `set_output()` now reads the state before taking remote, so
+  the remote request uses the right mode's command.
+- GUI: "take remote" calls `request_remote()` instead of a no-argument `set_output()`. Closing
+  the app switches the output off through the active mode's own command, and a failure in
+  one close step no longer skips the rest.
+- Docs: `PROTOCOL.md` records the end-marker rule, WebLink's 10-step batching and the
+  254-byte frame limit. The API table in `python/README.md` shows the `read_state` default
+  that changed in 0.6.3.
+
+None of this has run on hardware yet. It is checked against the WebLink source and with
+fake transports in the test suite.
+
 ## 0.6.3
 
 ### Changed
