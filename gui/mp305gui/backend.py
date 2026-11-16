@@ -225,21 +225,37 @@ class RealBackend:
         self._psu.set_output(current_over=int(mode))
 
     def set_remote(self, held):
-        # take remote control (remote_con=1, preserving V/I/output) or hand it back to the panel
+        # take remote control or hand it back to the panel. request_remote() goes through the
+        # current mode's connect command and changes no setpoint (set_output() is DC-only).
         if held:
-            self._psu.set_output()        # set_output() with no args just takes remote + preserves
+            if not self._psu.request_remote():
+                raise RuntimeError("device refused remote control")
         else:
             self._psu.release_remote()    # remote_con=0 → front panel regains control
 
     def reset_energy(self):
         pass   # no device command mapped for the energy/time reset yet
 
+    def _output_off(self):
+        # switch the output off through the active mode's own command (set_output is DC-only)
+        model = self._psu.read_state().model
+        if model == MODE_PROG:
+            self.program_run(False)
+        elif model == MODE_PD:
+            self.set_pd_output(False)
+        elif model == MODE_CHARGE:
+            self.set_charging(False)
+        else:
+            self._psu.output_off()
+
     def close(self):
-        try:
-            if self._psu:
-                self._psu.output_off(); self._psu.release_remote(); self._psu.close()
-        except Exception:
-            pass
+        if not self._psu:
+            return
+        for step in (self._output_off, self._psu.release_remote, self._psu.close):
+            try:                          # each step independently: a failure must not skip close()
+                step()
+            except Exception:
+                pass
 
 
 class _SyncBLE:
