@@ -118,9 +118,21 @@ def _process_hex_array(arr: list[int]) -> list[int]:
     return a
 
 
+# The frame's L byte (index 3) is a single byte holding 1 (cmd) + len(data), so one frame
+# carries at most 254 data bytes. Neither WebLink nor the HID fragmentation has a way to
+# extend it -- WebLink keeps long writes under it by batching (e.g. 10 program steps per 0xDA).
+MAX_FRAME_PAYLOAD = 0xFF - 1
+
+
 def build_frame(cmd: int, payload: bytes = b"") -> bytes:
-    """Build a complete HID frame (without the report-ID byte) for `cmd`+`payload`."""
-    body = [0x00, FRAME_START, GROUP_ID, (1 + len(payload)) & 0xFF, cmd, *payload, 0x00]
+    """Build a complete HID frame (without the report-ID byte) for `cmd`+`payload`.
+
+    Raises ValueError if `payload` is longer than MAX_FRAME_PAYLOAD (254) bytes: the
+    one-byte length field would silently wrap and the device would mis-parse the frame."""
+    if len(payload) > MAX_FRAME_PAYLOAD:
+        raise ValueError(f"payload for cmd 0x{cmd:02X} is {len(payload)} bytes; one frame "
+                         f"carries at most {MAX_FRAME_PAYLOAD} (1-byte length field)")
+    body = [0x00, FRAME_START, GROUP_ID, 1 + len(payload), cmd, *payload, 0x00]
     body = _add_0xAA(body)
     return bytes(_process_hex_array(body))
 

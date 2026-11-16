@@ -325,13 +325,21 @@ class MP305:
         raise MP305Error(f"mode switch to {model} not confirmed (still {last})")
 
     def set_output(self, voltage: float | None = None, current: float | None = None,
-                   on: bool | None = None, *, model: int = 0, current_over: int | None = None,
-                   real_change: int = 3, reapply: bool = False, timeout_ms: int = 1500) -> State:
+                   on: bool | None = None, *, model: int | None = None,
+                   current_over: int | None = None, real_change: int = 3,
+                   reapply: bool = False, timeout_ms: int = 1500) -> State:
         """Convenience: take remote control and set V / I / output in one call.
 
         Unspecified values are read from the current state so they are preserved.
         `current_over` sets the over-current behaviour (0 = CC current-limit,
         1 = OCP trip); left as None it is preserved. Returns the fresh state.
+
+        This drives the DC PSU (the 0xC8 command carries DC setpoints, and WebLink
+        only ever sends it in DC mode). `model=None` (default) requires the unit to
+        already be in DC mode and raises MP305Error otherwise, so a call made in
+        USB-PD / program / charge mode can't silently switch the unit to DC. Pass
+        `model=0` to explicitly switch to DC first (via set_mode(0), output off),
+        then apply. Any other `model` is rejected -- use set_mode() for that.
 
         `reapply`: when True and the output ends up on, the output is briefly
         cycled off->on after applying. This works around a device quirk: *lowering*
@@ -341,8 +349,17 @@ class MP305:
         limit mid-run and need CC to take effect immediately -- note it momentarily
         interrupts the output.
         """
+        if model not in (None, 0):
+            raise MP305Error(f"set_output() drives DC mode only (got model={model}); "
+                             "use set_mode() to switch modes")
+        st = self.read_state(timeout_ms=timeout_ms)      # also refreshes self._model
+        if st.model != 0:
+            if model is None:
+                raise MP305Error(f"set_output() drives DC mode, but the unit is in mode "
+                                 f"{st.model}; call set_mode(0) first or pass model=0")
+            self.set_mode(0, timeout_ms=timeout_ms)       # explicit model=0: switch properly
+            st = self.read_state(timeout_ms=timeout_ms)
         self._ensure_remote(timeout_ms)
-        st = self.read_state(timeout_ms=timeout_ms)
         target_on = st.output if on is None else (1 if on else 0)
         cmd = ControlCommand(
             remote_con=1,
@@ -352,7 +369,7 @@ class MP305:
             voltage_slow=st.voltage_slow,
             current_over=st.current_over if current_over is None else current_over,
             output=target_on,
-            model=model,
+            model=0,
             refresh=0,
         )
         f = self.control(cmd, timeout_ms=timeout_ms)
@@ -457,6 +474,9 @@ class MP305:
         return ProgramList.parse(f.values, index=5)
 
     def read_program_steps(self, seq_id: int, number: int, timeout_ms: int = 1500) -> ProgramSteps:
+        """Read the steps of a stored sequence (`0xD8`→`0xD9`). Decodes ONE 0xD9 frame.
+        WebLink expects a sequence of more than 10 steps to come back as several 0xD9
+        frames of up to 10 steps each; collecting those is not implemented here."""
         cmd, payload = C.programmable_read(seq_id)
         f = self.request(cmd, P.RESP_PROGRAM_STEPS, payload, timeout_ms)
         return ProgramSteps.parse(f.values, number, index=5)
@@ -467,9 +487,24 @@ class MP305:
 
     def write_program(self, seq_id: int, steps: list[dict], timeout_ms: int = 1500) -> P.Frame:
         """Write a programmable sequence's steps (`0xDA`→`0xDB`). Each step:
-        {"V": volts, "A": amps, "S": seconds}."""
-        cmd, payload = C.programmable_write(seq_id, steps)
-        return self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout_ms)
+        {"V": volts, "A": amps, "S": seconds}; a final step with S=0 is the end marker.
+
+        Like WebLink, the steps go out in batches of ``commands.PROGRAM_STEPS_PER_WRITE``
+        (10) per 0xDA frame, each acknowledged by 0xDB before the next is sent, so there
+        is no per-call step limit (WebLink's editor caps a sequence at 100 steps; that is
+        not enforced here). WebLink announces the write first with
+        ``program_change(seq_id, name, len(steps), remove=2)``. Returns the last 0xDB.
+        Raises MP305Error if a batch is refused (0xDB status other than 0/1, as WebLink
+        treats it) -- the remaining batches are not sent."""
+        n = C.PROGRAM_STEPS_PER_WRITE
+        f = None
+        for i in range(0, max(len(steps), 1), n):
+            cmd, payload = C.programmable_write(seq_id, steps[i:i + n])
+            f = self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout_ms)
+            if self._control_status(f) not in (0, 1):
+                raise MP305Error(f"write_program: batch at step {i} refused "
+                                 f"(0xDB status {self._control_status(f)})")
+        return f
 
     def program_change(self, seq_id: int, name: str, num: int, is_last: int = 1,
                        remove: int = 0, timeout_ms: int = 1500) -> P.Frame:

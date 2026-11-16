@@ -62,6 +62,7 @@ class MP305BLE:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._remote_held = False
         self._no_realtime = False   # some units never answer 0xBD; fall back to 0xC2 (see read_state)
+        self._model = 0             # last-seen active mode (0 DC, 1 program, 2 USB-PD, 3 charge)
 
     # ---- discovery / connection -----------------------------------------
     @staticmethod
@@ -176,11 +177,15 @@ class MP305BLE:
         if realtime and not self._no_realtime:
             try:
                 f = await self.request(P.CMD_REALTIME, P.RESP_STATE, timeout=timeout)
-                return State.parse(f.values, index=_IDX, device_name=self.device_name)
+                st = State.parse(f.values, index=_IDX, device_name=self.device_name)
+                self._model = st.model
+                return st
             except MP305Error:
                 self._no_realtime = True   # this unit doesn't answer 0xBD; use 0xC2 from now on
         f = await self.request(P.CMD_STATE_INFO, P.RESP_STATE, timeout=timeout)
-        return State.parse(f.values, index=_IDX, device_name=self.device_name)
+        st = State.parse(f.values, index=_IDX, device_name=self.device_name)
+        self._model = st.model
+        return st
 
     async def read_system_settings(self, timeout: float = 2.0) -> SystemSettings:
         f = await self.request(P.CMD_SYS_GET, P.RESP_SYS, timeout=timeout)
@@ -221,6 +226,7 @@ class MP305BLE:
         return ProgramList.parse(f.values, index=_IDX)
 
     async def read_program_steps(self, seq_id: int, number: int, timeout: float = 2.0) -> ProgramSteps:
+        """Read a stored sequence's steps from ONE 0xD9 frame (see MP305.read_program_steps)."""
         cmd, payload = C.programmable_read(seq_id)
         f = await self.request(cmd, P.RESP_PROGRAM_STEPS, payload, timeout)
         return ProgramSteps.parse(f.values, number, index=_IDX)
@@ -229,13 +235,20 @@ class MP305BLE:
     async def control(self, cmd: ControlCommand, timeout: float = 2.0) -> P.Frame:
         return await self.request(P.CMD_CONTROL, P.RESP_CONTROL, cmd.payload(), timeout)
 
+    @staticmethod
+    def _control_status(frame: P.Frame) -> int:
+        return frame.payload[0] if frame.payload else -1
+
     async def request_remote(self, timeout: float = 45.0) -> bool:
-        """Request remote control (remoteCon=2). Over BLE this is gated by an
-        on-device confirmation -- the MP305 shows an "allow remote control" prompt
-        that must be accepted on its touch screen, hence the long default timeout.
-        Returns True if granted (0xC9 status 0)."""
-        f = await self.control(ControlCommand(remote_con=2), timeout=timeout)
-        self._remote_held = (f.payload[0] if f.payload else -1) == 0
+        """Request remote control (remoteCon=2), using the current mode's connect
+        command (as the USB driver does). Over BLE this is gated by an on-device
+        confirmation -- the MP305 shows an "allow remote control" prompt that must be
+        accepted on its touch screen, hence the long default timeout. Returns True if
+        granted (status 0). Does not change any setpoint."""
+        cmd, expect = self._MODE_CONNECT.get(self._model, self._MODE_CONNECT[0])
+        f = await self.request(cmd, expect, self._mode_payload(self._model, 2, self._model),
+                               timeout)
+        self._remote_held = self._control_status(f) == 0
         return self._remote_held
 
     async def _ensure_remote(self, timeout: float) -> None:
@@ -244,10 +257,25 @@ class MP305BLE:
                              "'remote control' prompt on the MP305 touch screen")
 
     async def set_output(self, voltage: float | None = None, current: float | None = None,
-                         on: bool | None = None, *, model: int = 0, current_over: int | None = None,
-                         real_change: int = 3, timeout: float = 2.0) -> State:
+                         on: bool | None = None, *, model: int | None = None,
+                         current_over: int | None = None, real_change: int = 3,
+                         reapply: bool = False, timeout: float = 2.0) -> State:
+        """Take remote control and set V / I / output -- same semantics as
+        ``MP305.set_output`` (DC mode only: `model=None` refuses outside DC mode,
+        `model=0` switches to DC first; `reapply=True` cycles the output off->on so
+        a lowered current limit engages CC). Returns the fresh state."""
+        if model not in (None, 0):
+            raise MP305Error(f"set_output() drives DC mode only (got model={model}); "
+                             "use set_mode() to switch modes")
+        st = await self.read_state(timeout=timeout)      # also refreshes self._model
+        if st.model != 0:
+            if model is None:
+                raise MP305Error(f"set_output() drives DC mode, but the unit is in mode "
+                                 f"{st.model}; call set_mode(0) first or pass model=0")
+            await self.set_mode(0, timeout=timeout)       # explicit model=0: switch properly
+            st = await self.read_state(timeout=timeout)
         await self._ensure_remote(timeout)
-        st = await self.read_state(timeout=timeout)
+        target_on = st.output if on is None else (1 if on else 0)
         cmd = ControlCommand(
             remote_con=1,
             set_voltage=st.set_voltage if voltage is None else voltage,
@@ -255,13 +283,20 @@ class MP305BLE:
             real_change=real_change,
             voltage_slow=st.voltage_slow,
             current_over=st.current_over if current_over is None else current_over,
-            output=st.output if on is None else (1 if on else 0),
-            model=model, refresh=0,
+            output=target_on,
+            model=0, refresh=0,
         )
         f = await self.control(cmd, timeout=timeout)
-        if (f.payload[0] if f.payload else -1) == 1:        # remote dropped -- re-acquire once
+        if self._control_status(f) == 1:        # remote dropped -- re-acquire once and retry
             self._remote_held = False
             await self._ensure_remote(timeout)
+            f = await self.control(cmd, timeout=timeout)
+            if self._control_status(f) == 1:
+                raise MP305Error("control command rejected: device refused remote control")
+        if reapply and target_on:               # cycle output so a lowered current limit re-arms as CC
+            cmd.output = 0
+            await self.control(cmd, timeout=timeout)
+            cmd.output = 1
             await self.control(cmd, timeout=timeout)
         return await self.read_state(timeout=timeout)
 
@@ -345,8 +380,17 @@ class MP305BLE:
         return await self.request(cmd, P.RESP_PROGRAM_CONNECT, payload, timeout)
 
     async def write_program(self, seq_id: int, steps: list[dict], timeout: float = 2.0) -> P.Frame:
-        cmd, payload = C.programmable_write(seq_id, steps)
-        return await self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout)
+        """Write a sequence's steps in WebLink-sized 0xDA batches of 10, each acked by
+        0xDB (see ``MP305.write_program``). Returns the last 0xDB frame."""
+        n = C.PROGRAM_STEPS_PER_WRITE
+        f = None
+        for i in range(0, max(len(steps), 1), n):
+            cmd, payload = C.programmable_write(seq_id, steps[i:i + n])
+            f = await self.request(cmd, P.RESP_PROGRAM_WRITE, payload, timeout)
+            if self._control_status(f) not in (0, 1):
+                raise MP305Error(f"write_program: batch at step {i} refused "
+                                 f"(0xDB status {self._control_status(f)})")
+        return f
 
     async def program_change(self, seq_id: int, name: str, num: int, is_last: int = 1,
                              remove: int = 0, timeout: float = 2.0) -> P.Frame:

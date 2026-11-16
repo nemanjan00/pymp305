@@ -244,6 +244,13 @@ which is `0000MP305A`/`0000MP305B`). `0000fee0`/`fee1` carry the BLE OTA.
 - `0xDF` ProgramResp: live programmable-run state incl. a large e-marker block.
 - `0xD5` ProgrammableSearchResp: list of stored sequences `[name[16], num]`.
 - `0xD9` ProgrammableOutputResp: steps `[V mV, A mA, S ×0.1s]` (last step with S=0 is raw V/A).
+  Only S exactly 0 counts: WebLink's parser tests `time / 10 == 0`, which is JS float division,
+  and its `0xDA` writer uses the same `S == 0` rule. A sequence is read/written in chunks of at
+  most 10 steps: WebLink sends `0xD6` (flag 2 = steps follow) then one `0xDA` per 10 steps,
+  waiting for each `0xDB`, and expects longer sequences back as several `0xD9` frames.
+- Frame size: the HID length byte `L` is one byte (`1 + len(data)`), so one frame carries at
+  most 254 data bytes (21 program steps). There is no extension mechanism; the 61-byte HID
+  fragmentation only splits a frame across reports.
 
 ## Firmware & OTA
 Two formats, both implemented in `pymp305.ota`:

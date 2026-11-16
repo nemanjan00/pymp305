@@ -69,13 +69,29 @@ def programmable_change(seq_id: int, name: str, num: int, is_last: int = 1,
     return (0xD6, bytes([seq_id & 0xFF]) + nm + bytes([num & 0xFF, is_last & 0xFF, remove & 0xFF]))
 
 
+# One 0xDA frame holds [id] + 12 bytes per step, and the HID length byte caps a frame at
+# 254 data bytes -> at most 21 steps per frame. WebLink never goes near that: it sends a
+# sequence in batches of 10 steps per 0xDA, waiting for each 0xDB, so that is what
+# MP305.write_program / MP305BLE.write_program do.
+PROGRAM_MAX_STEPS_PER_FRAME = (P.MAX_FRAME_PAYLOAD - 1) // 12     # 21
+PROGRAM_STEPS_PER_WRITE = 10                                       # WebLink's batch size
+
+
 def programmable_write(seq_id: int, steps: list[dict]):
-    """0xDA — write the steps of a sequence. -> 0xDB.
+    """0xDA — write the steps of a sequence (ONE frame). -> 0xDB.
 
     Each step is a dict {"V": volts, "A": amps, "S": seconds}. Matches
     DP3005Req.ProgrammableWriteCmd: V/A in mV/mA, S in 0.1 s units; a final step with
-    S==0 is sent with raw V/A (sentinel) per the firmware's convention.
+    S==0 is sent with raw V/A (sentinel) per the firmware's convention. That is the
+    same rule ``responses.ProgramSteps.parse`` applies when reading steps back.
+
+    At most PROGRAM_MAX_STEPS_PER_FRAME (21) steps fit one frame; more raises
+    ValueError. Use ``write_program`` on the device classes for longer sequences:
+    it splits them into WebLink-sized batches of PROGRAM_STEPS_PER_WRITE (10).
     """
+    if len(steps) > PROGRAM_MAX_STEPS_PER_FRAME:
+        raise ValueError(f"{len(steps)} steps don't fit one 0xDA frame (max "
+                         f"{PROGRAM_MAX_STEPS_PER_FRAME}); use write_program(), which batches")
     body = bytearray([seq_id & 0xFF])
     n = len(steps)
     for j, st in enumerate(steps):

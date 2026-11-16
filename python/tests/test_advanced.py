@@ -113,6 +113,48 @@ def test_program_steps_decode():
     assert ps.steps[1]["V"] == 12 and ps.steps[1]["S"] == 0.0   # sentinel
 
 
+def test_program_steps_short_final_step_is_scaled():
+    # a final step of 0.5 s (t=5) is a normal step: only t == 0 marks the raw end sentinel
+    payload = bytearray([0])
+    payload += struct.pack("<iii", 3300, 500, 20)
+    payload += struct.pack("<iii", 5000, 1000, 5)       # last step, 0.5 s
+    ps = ProgramSteps.parse(_hid_frame(P.RESP_PROGRAM_STEPS, bytes(payload)), number=2, index=5)
+    assert ps.steps[1] == {"V": 5.0, "A": 1.0, "S": 0.5}
+
+
+def test_program_write_parse_roundtrip():
+    # what programmable_write sends must read back unchanged, for every final-step time
+    for last_s in (0, 0.1, 0.5, 0.9, 1.0, 12.3):
+        steps = [{"V": 3.3, "A": 0.5, "S": 2.0}, {"V": 5.0, "A": 1.0, "S": last_s}]
+        if last_s == 0:
+            steps[-1] = {"V": 0, "A": 0, "S": 0}         # the raw sentinel/terminator
+        cmd, pl = C.programmable_write(1, steps)
+        ps = ProgramSteps.parse(_hid_frame(0xD9, pl), number=2, index=5)
+        for got, want in zip(ps.steps, steps):
+            assert abs(got["V"] - want["V"]) < 1e-9 and abs(got["A"] - want["A"]) < 1e-9
+            assert abs(got["S"] - want["S"]) < 1e-9
+
+
+def test_program_write_builder_frame_limit():
+    one = {"V": 5.0, "A": 1.0, "S": 1.0}
+    cmd, pl = C.programmable_write(1, [one] * C.PROGRAM_MAX_STEPS_PER_FRAME)   # 21 fits
+    assert len(pl) == 1 + 12 * 21 and P.build_frame(cmd, pl)[3] == 254
+    try:
+        C.programmable_write(1, [one] * (C.PROGRAM_MAX_STEPS_PER_FRAME + 1))
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_build_frame_rejects_oversized_payload():
+    assert P.build_frame(0xD2, bytes(P.MAX_FRAME_PAYLOAD))[3] == 0xFF     # L = 1 + 254
+    try:
+        P.build_frame(0xD2, bytes(P.MAX_FRAME_PAYLOAD + 1))              # would wrap L to 0
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_program_write_builder():
     cmd, payload = C.programmable_write(0, [{"V": 5.0, "A": 1.0, "S": 10},
                                             {"V": 12.0, "A": 0.0, "S": 0}])

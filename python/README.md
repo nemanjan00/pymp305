@@ -70,9 +70,9 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `MP305.list_devices()` | enumerate VID `0x28E9` HID interfaces |
 | `MP305.open(path=None)` | open (auto-picks usage_page 0x01 / usage 0x04) |
 | `hardware_info()` | `0xE0`→`0xE1` device id, firmware versions |
-| `read_state(realtime=True)` | `0xBD`/`0xC2`→`0xC3` live V/I/W/Wh/temp/output (`State`) |
+| `read_state(realtime=False)` | `0xBD`/`0xC2`→`0xC3` live V/I/W/Wh/temp/output (`State`) |
 | `read_system_settings()` | `0xC4`→`0xC5` (`SystemSettings`) |
-| `set_output(voltage, current, on, model=0)` | take control + apply, returns fresh `State` |
+| `set_output(voltage, current, on, reapply=False, model=None)` | DC mode: take control + apply, returns fresh `State`. Refuses outside DC mode unless `model=0` (switch to DC first) |
 | `output_on()` / `output_off()` | toggle output |
 | `release_remote()` | `remoteCon=0` — return control to the panel |
 | `control(ControlCommand)` | low-level `0xC8` |
@@ -83,7 +83,7 @@ See [`examples/basic.py`](./examples/basic.py) for a live-streaming example.
 | `read_pdo(id)` / `pdo_connect(PDOConnect)` / `write_pdo(...)` | `0xD0`→`0xD1` read / `0xE8`→`0xE9` select / `0xD2`→`0xD3` define a PD profile |
 | `read_program_list()` / `read_program_steps(id, n)` | `0xD4`→`0xD5` / `0xD8`→`0xD9` |
 | `read_program_state()` / `program_connect(ProgramConnect)` | `0xDE`→`0xDF` / `0xE2`→`0xE3` run a sequence |
-| `write_program(id, steps)` / `program_change(...)` | `0xDA`→`0xDB` write steps / `0xD6`→`0xD7` create/rename/delete slot |
+| `write_program(id, steps)` / `program_change(...)` | `0xDA`→`0xDB` write steps (sent in WebLink-style batches of 10 per frame) / `0xD6`→`0xD7` create/rename/delete slot |
 | `read_emarker()` | USB-C cable e-marker info (speed/format labelled) |
 | `flash(Firmware, allow_untested_ota=True)` | **experimental** OTA over HID (see warnings) |
 | `reboot()` / `enter_bootloader()` | danger zone |

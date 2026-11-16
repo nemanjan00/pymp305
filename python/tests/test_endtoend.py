@@ -98,17 +98,17 @@ def test_e2e_read_program_list():
 
 
 def test_e2e_set_output_builds_control():
-    # set_output does the remote handshake first:
-    #   request_remote (0xC8 remoteCon=2) -> read_state -> control(0xC8 remoteCon=1) -> read_state
+    # set_output reads the state (mode check), then does the remote handshake:
+    #   read_state -> request_remote (0xC8 remoteCon=2) -> control(0xC8 remoteCon=1) -> read_state
     psu = MP305(FakeHID([
-        _resp(P.RESP_CONTROL, b"\x00"),   # remote request granted
         _resp(P.RESP_STATE, _state_payload(setv=500, setc=1000, out=0)),
+        _resp(P.RESP_CONTROL, b"\x00"),   # remote request granted
         _resp(P.RESP_CONTROL, b"\x00"),   # setpoint applied
         _resp(P.RESP_STATE, _state_payload(setv=900, setc=2000, out=1)),
     ]))
     st = psu.set_output(voltage=9.0, current=2.0, on=True)
-    # 1st write requests remote control (remoteCon=2), does not touch setpoints
-    req = P.parse_report(psu._dev.written[0])
+    # 2nd write requests remote control (remoteCon=2), does not touch setpoints
+    req = P.parse_report(psu._dev.written[1])
     assert req.cmd == P.CMD_CONTROL and req.payload[0] == 2
     # 3rd write is the actual 0xC8 setpoint frame (remoteCon=1)
     ctrl = P.parse_report(psu._dev.written[2])
@@ -122,7 +122,8 @@ def test_e2e_set_output_builds_control():
 def test_e2e_set_output_rejected_without_remote():
     # if the device refuses remote control (0xC9 status 1), set_output raises
     from pymp305.device import MP305Error
-    psu = MP305(FakeHID([_resp(P.RESP_CONTROL, b"\x01")]))   # remote request denied
+    psu = MP305(FakeHID([_resp(P.RESP_STATE, _state_payload()),
+                         _resp(P.RESP_CONTROL, b"\x01")]))   # remote request denied
     try:
         psu.set_output(voltage=5.0, current=1.0, on=True)
         assert False, "expected MP305Error"
@@ -134,8 +135,8 @@ def test_e2e_set_output_reapply_cycles_output():
     # reapply=True should cycle the output off->on after applying so a lowered
     # current limit re-arms; last two control frames must be output=0 then output=1
     psu = MP305(FakeHID([
-        _resp(P.RESP_CONTROL, b"\x00"),                       # request_remote
         _resp(P.RESP_STATE, _state_payload(out=1)),           # read_state (output on)
+        _resp(P.RESP_CONTROL, b"\x00"),                       # request_remote
         _resp(P.RESP_CONTROL, b"\x00"),                       # apply setpoint
         _resp(P.RESP_CONTROL, b"\x00"),                       # cycle: output off
         _resp(P.RESP_CONTROL, b"\x00"),                       # cycle: output on
@@ -150,8 +151,8 @@ def test_e2e_set_output_reapply_cycles_output():
 def test_e2e_set_output_current_over():
     # set_output(current_over=1) sets the OCP mode byte in the 0xC8 frame (via handshake)
     psu = MP305(FakeHID([
-        _resp(P.RESP_CONTROL, b"\x00"),               # request_remote
         _resp(P.RESP_STATE, _state_payload()),        # read_state
+        _resp(P.RESP_CONTROL, b"\x00"),               # request_remote
         _resp(P.RESP_CONTROL, b"\x00"),               # apply
         _resp(P.RESP_STATE, _state_payload()),        # final read_state
     ]))
@@ -196,6 +197,102 @@ def test_e2e_write_program_request():
     psu = MP305(FakeHID([_resp(P.RESP_PROGRAM_WRITE, b"\x00")]))
     psu.write_program(1, [{"V": 5.0, "A": 1.0, "S": 10}])
     assert P.parse_report(psu._dev.written[0]).cmd == 0xDA
+
+
+def test_e2e_set_output_retry_raises_on_second_rejection():
+    # remote dropped (status 1) -> re-acquire once and retry; a second status 1 raises
+    from pymp305.device import MP305Error
+    psu = MP305(FakeHID([
+        _resp(P.RESP_STATE, _state_payload()),
+        _resp(P.RESP_CONTROL, b"\x00"),   # remote granted
+        _resp(P.RESP_CONTROL, b"\x01"),   # apply rejected
+        _resp(P.RESP_CONTROL, b"\x00"),   # remote re-granted
+        _resp(P.RESP_CONTROL, b"\x01"),   # retry rejected again
+    ]))
+    try:
+        psu.set_output(voltage=5.0)
+        assert False, "expected MP305Error"
+    except MP305Error:
+        pass
+
+
+def test_e2e_set_output_refuses_outside_dc_mode():
+    # in USB-PD mode (model 2) a plain set_output must not send 0xC8 (it would switch to DC)
+    from pymp305.device import MP305Error
+    psu = MP305(FakeHID([_resp(P.RESP_STATE, _state_payload(model=2))]))
+    try:
+        psu.set_output(voltage=5.0)
+        assert False, "expected MP305Error"
+    except MP305Error as e:
+        assert "mode 2" in str(e)
+    assert len(psu._dev.written) == 1                 # only the state read went out
+    assert psu._model == 2
+
+
+def test_e2e_set_output_rejects_non_dc_model():
+    from pymp305.device import MP305Error
+    psu = MP305(FakeHID([]))
+    try:
+        psu.set_output(voltage=5.0, model=2)
+        assert False, "expected MP305Error"
+    except MP305Error:
+        pass
+    assert psu._dev.written == []
+
+
+def test_e2e_set_output_model0_switches_to_dc_first():
+    # explicit model=0 from USB-PD: set_mode(0) through the PD connect command (0xE8), then 0xC8
+    psu = MP305(FakeHID([
+        _resp(P.RESP_STATE, _state_payload(model=2)),        # set_output's read_state
+        _resp(P.RESP_STATE, _state_payload(model=2)),        # set_mode's read_state
+        _resp(P.RESP_PDO_CONNECT, b"\x00"),                  # request_remote via 0xE8
+        _resp(P.RESP_PDO_CONNECT, b"\x00"),                  # switch 0xE8 model=0
+        _resp(P.RESP_STATE, _state_payload(model=0)),        # set_mode confirm
+        _resp(P.RESP_STATE, _state_payload(model=0, setv=500, setc=1000)),  # re-read DC setpoints
+        _resp(P.RESP_CONTROL, b"\x00"),                      # apply
+        _resp(P.RESP_STATE, _state_payload(model=0)),        # final read_state
+    ]))
+    psu.set_output(voltage=9.0, model=0)
+    cmds = [P.parse_report(w).cmd for w in psu._dev.written]
+    assert cmds == [0xC2, 0xC2, 0xE8, 0xE8, 0xC2, 0xC2, 0xC8, 0xC2]
+    sw = P.parse_report(psu._dev.written[3])
+    assert sw.payload[0] == 1 and sw.payload[-1] == 0               # remoteCon=1, model=0
+    rc, sv, sc, *_rest, model, refresh = struct.unpack("<BHHBBBBBB", P.parse_report(psu._dev.written[6]).payload)
+    assert (rc, sv, sc, model) == (1, 900, 1000, 0)
+
+
+def test_e2e_request_remote_uses_current_mode_command():
+    # after a read_state in program mode, request_remote goes through 0xE2 (not 0xC8)
+    psu = MP305(FakeHID([
+        _resp(P.RESP_STATE, _state_payload(model=1)),
+        _resp(P.RESP_PROGRAM_CONNECT, b"\x00"),
+    ]))
+    psu.read_state()
+    assert psu.request_remote() is True
+    f = P.parse_report(psu._dev.written[1])
+    assert f.cmd == 0xE2 and f.payload[0] == 2 and f.payload[3] == 1   # remoteCon=2, stays model 1
+
+
+def test_e2e_write_program_batches_of_10():
+    # 23 steps -> three 0xDA frames (10 + 10 + 3), each waiting for its 0xDB
+    steps = [{"V": 1.0 + k, "A": 0.5, "S": 2.0} for k in range(22)] + [{"V": 0, "A": 0, "S": 0}]
+    psu = MP305(FakeHID([_resp(P.RESP_PROGRAM_WRITE, b"\x00")] * 3))
+    psu.write_program(4, steps)
+    expected = []
+    for batch in (steps[:10], steps[10:20], steps[20:]):
+        expected += P.build_reports(*C.programmable_write(4, batch))
+    assert psu._dev.written == expected
+
+
+def test_e2e_write_program_stops_on_refused_batch():
+    from pymp305.device import MP305Error
+    steps = [{"V": 5.0, "A": 1.0, "S": 1.0}] * 15
+    psu = MP305(FakeHID([_resp(P.RESP_PROGRAM_WRITE, b"\x02")]))
+    try:
+        psu.write_program(1, steps)
+        assert False, "expected MP305Error"
+    except MP305Error:
+        pass
 
 
 def test_e2e_read_pdo_index():

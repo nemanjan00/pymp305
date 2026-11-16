@@ -439,7 +439,12 @@ class ProgramList:
 @dataclass
 class ProgramSteps:
     """Decoded 0xD9 steps of one programmable sequence (ProgrammableOutputResp).
-    Each step: V (volts), A (amps), S (seconds)."""
+    Each step: V (volts), A (amps), S (seconds).
+
+    End-marker rule (same as ``commands.programmable_write``): a *last* step with a
+    time of exactly 0 carries raw V/A (no mV/mA scaling); every other step is
+    scaled. WebLink's parser tests ``time / 10 == 0`` -- JS float division, so it
+    only holds for time == 0 (a 0.1-0.9 s final step is a normal, scaled step)."""
     id: int = -1
     steps: list[dict] = field(default_factory=list)
     raw: bytes = b""
@@ -453,7 +458,7 @@ class ProgramSteps:
             volt = _u32(v, i); i += 4
             cur = _u32(v, i); i += 4
             t = _u32(v, i); i += 4
-            last_zero = (k == number - 1 and t // 10 == 0)
+            last_zero = (k == number - 1 and t == 0)
             p.steps.append({
                 "V": volt if last_zero else volt / 1000.0,
                 "A": cur if last_zero else cur / 1000.0,
